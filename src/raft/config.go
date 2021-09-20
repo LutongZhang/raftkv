@@ -405,6 +405,10 @@ func (cfg *config) checkOneLeader() int {
 func (cfg *config) checkTerms() int {
 	term := -1
 	for i := 0; i < cfg.n; i++ {
+		//
+		//t,_:=cfg.rafts[i].GetState()
+		//fmt.Println(fmt.Sprintf("xxx %d term %d",i,t))
+		//
 		if cfg.connected[i] {
 			xterm, _ := cfg.rafts[i].GetState()
 			if term == -1 {
@@ -440,6 +444,7 @@ func (cfg *config) nCommitted(index int) (int, interface{}) {
 
 		cfg.mu.Lock()
 		cmd1, ok := cfg.logs[i][index]
+		//fmt.Println("xxx", i, " ", cfg.logs[i])
 		cfg.mu.Unlock()
 
 		if ok {

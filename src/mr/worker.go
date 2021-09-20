@@ -1,6 +1,14 @@
 package mr
 
-import "fmt"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"os"
+	"sort"
+	"time"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
@@ -9,10 +17,20 @@ import "hash/fnv"
 //
 // Map functions return a slice of KeyValue.
 //
+
 type KeyValue struct {
 	Key   string
 	Value string
 }
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -24,18 +42,164 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func readFile(filename string)[]byte{
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	file.Close()
+	return content
+}
+
 
 //
 // main/mrworker.go calls this function.
 //
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
+	for {
+		requestTaskArgs := RequestTaskArgs{
+			"worker",
+			0,
+		}
+		requestTaskReturn := RequestTaskReturn{}
+		success := call("Coordinator.RequestTask", &requestTaskArgs, &requestTaskReturn)
+		if !success{
+			fmt.Println("no success")
+			continue
+		}
+		if requestTaskReturn.Task.TaskType == SLEEP{
+			time.Sleep(3*time.Second)
+		} else if requestTaskReturn.Task.TaskType == MAP{
+			//fmt.Println("xx")
+			fs,err := doMap(mapf,requestTaskReturn)
+			if err != nil{
+				continue
+			}
+			reportTaskArgs := ReportTaskArgs{
+				requestTaskReturn.Task,
+					fs,
+			}
+			reportTaskReturn := ReportTaskReturn{}
+			success = call("Coordinator.ReportTask",&reportTaskArgs,&reportTaskReturn)
+			if ! success{
+				continue
+			}
+		} else if requestTaskReturn.Task.TaskType == REDUCE{
+			//fmt.Println("xx")
+			fs,err := doReduce(reducef,requestTaskReturn)
+			if err != nil{
+				continue
+			}
+			reportTaskArgs := ReportTaskArgs{
+				requestTaskReturn.Task,
+				fs,
+			}
+			reportTaskReturn := ReportTaskReturn{}
+			success = call("Coordinator.ReportTask",&reportTaskArgs,&reportTaskReturn)
+			if ! success{
+				continue
+			}
+		}
+	}
+}
 
-	// Your worker implementation here.
+func doMap(mapf func(string, string) []KeyValue,requestTaskReturn RequestTaskReturn)([]string,error){
+	kva := []KeyValue{}
+	for _,fileName := range requestTaskReturn.Task.Input{
+		content := readFile(fileName)
+		val := mapf(fileName,string(content))
+		kva = append(kva,val...)
+	}
+	X := requestTaskReturn.Task.TaskNumber
+	files := make(map[string]*os.File)
+	defer func(){
+		for _,v := range files{
+			v.Close()
+		}
+	}()
+	for i := 0; i < requestTaskReturn.NReduce;i++{
+		f,err := ioutil.TempFile(".","")
+		if err != nil{
+			return nil,errors.New("create file failed")
+		}
+		files[fmt.Sprintf("mr-%d-%d",X,i)]=f
+	}
+	for _, pair := range kva{
+		Y := ihash(pair.Key) % requestTaskReturn.NReduce
+		f := files[fmt.Sprintf("mr-%d-%d",X,Y)]
+		enc := json.NewEncoder(f)
+		err :=enc.Encode(&pair)
+		if err != nil{
+			return nil,err
+		}
+	}
+	fs := []string{}
+	for k,v := range files{
+		err :=os.Rename(v.Name(),k)
+		if err != nil{
+			return nil,err
+		}
+		fs = append(fs,k)
+	}
+	return fs,nil
+}
 
-	// uncomment to send the Example RPC to the coordinator.
-	// CallExample()
 
+func doReduce(reducef func(string, []string) string,requestTaskReturn RequestTaskReturn)([]string,error){
+	kva := []KeyValue{}
+	files := make(map[string]*os.File)
+	defer func(){
+		for _,v := range files{
+			v.Close()
+		}
+	}()
+	for _,fileName := range requestTaskReturn.Task.Input{
+		f, err := os.OpenFile(fileName,os.O_RDWR,os.ModePerm)
+		if err != nil{
+			return nil,err
+		}
+		files[fileName]=f
+		dec := json.NewDecoder(f)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			kva = append(kva, kv)
+		}
+	}
+	sort.Sort(ByKey(kva))
+
+	oname := fmt.Sprintf("mr-out-%d",requestTaskReturn.Task.TaskNumber)
+	ofile, err := ioutil.TempFile(".","")
+	if err != nil{
+		return nil,err
+	}
+	defer func(){
+		ofile.Close()
+	}()
+	i := 0
+	for i < len(kva) {
+		j := i + 1
+		for j < len(kva) && kva[j].Key == kva[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, kva[k].Value)
+		}
+		output := reducef(kva[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+		i = j
+	}
+	os.Rename(ofile.Name(),oname)
+	return []string{oname},nil
 }
 
 //
