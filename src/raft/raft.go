@@ -237,17 +237,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	//fmt.Println(fmt.Sprintf("%d with term %d to %d with term %d", rf.me, rf.currentTerm, args.CandidateId, args.Term))
 	if args.Term > rf.currentTerm {
-		rf.changeToFollower()
-		rf.votedFor = -1
-		rf.currentTerm = args.Term
-		//rf.persist()
+		rf.changeToFollower(args.Term, -1)
 	}
 
 	lastLog := rf.log[len(rf.log)-1]
 	uptoData := (args.LastLogTerm == lastLog.Term && args.LastLogIdx >= lastLog.Idx) || (args.LastLogTerm > lastLog.Term)
 	if rf.votedFor == -1 && uptoData {
-		rf.votedFor = args.CandidateId
-		rf.changeToFollower()
+		rf.changeToFollower(rf.currentTerm, args.CandidateId)
 		reply.Term = rf.currentTerm
 		reply.VoteGrant = true
 	} else {
@@ -295,9 +291,8 @@ func (rf *Raft) startElection() {
 	ch := make(chan bool)
 	defer close(ch)
 	rf.mu.Lock()
-	//rf.role = Candidate
-	rf.currentTerm = rf.currentTerm + 1
-	rf.votedFor = rf.me
+	//rf.currentTerm = rf.currentTerm + 1
+	//rf.votedFor = rf.me
 	currTerm := rf.currentTerm
 	me := rf.me
 	lastLog := rf.log[len(rf.log)-1]
@@ -360,13 +355,12 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	//fmt.Println(fmt.Sprintf("%s %d receive appendEntry from %d", roleStr(rf.role), rf.me, args.LeaderId))
 	//reset term
 	if args.Term >= rf.currentTerm {
-		rf.changeToFollower()
 		if args.Term > rf.currentTerm {
-			rf.currentTerm = args.Term
-			rf.votedFor = -1
+			rf.changeToFollower(args.Term, -1)
+		} else {
+			rf.changeToFollower(rf.currentTerm, rf.votedFor)
 		}
-	}
-	if args.Term < rf.currentTerm {
+	} else {
 		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
@@ -383,9 +377,10 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	if args.PrevLogTerm == rf.log[len(rf.log)-1].Term {
 		reply.Term = rf.currentTerm
 		reply.Success = true
-		for _, entry := range args.Entries {
-			rf.log = append(rf.log, entry)
-		}
+		//for _, entry := range args.Entries {
+		//	rf.log = append(rf.log, entry)
+		//}
+		rf.appendLogs(args.Entries)
 		fmt.Println(fmt.Sprintf("%s %d append %v in log with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], rf.commitIdx, rf.lastApplied))
 		//progress commitIdx //
 		if args.LeaderCommit > rf.commitIdx {
@@ -430,7 +425,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	prevLog := rf.log[len(rf.log)-1]
 	newIdx := prevLog.Idx + 1
 	term := rf.currentTerm
-	rf.log = append(rf.log, LogEntry{
+	//rf.log = append(rf.log, LogEntry{
+	//	Command: command,
+	//	Term:    term,
+	//	Idx:     newIdx,
+	//})
+	rf.appendLog(&LogEntry{
 		Command: command,
 		Term:    term,
 		Idx:     newIdx,
@@ -479,12 +479,17 @@ func (rf *Raft) ticker() {
 				if role == Follower {
 					fmt.Println(fmt.Sprintf("%s %d heartbeat timeout", roleStr(role), me))
 					rf.mu.Lock()
-					rf.changeToCandidate()
+					rf.changeToCandidate(rf.currentTerm+1, rf.me)
+					//rf.currentTerm = rf.currentTerm + 1
+					//rf.votedFor = rf.me
 					rf.mu.Unlock()
 					rf.startElection()
 				} else if role == Candidate {
 					rf.mu.Lock()
-					rf.setNewElectionPoint()
+					rf.changeToCandidate(rf.currentTerm+1, rf.me)
+					//rf.setNewElectionPoint()
+					//rf.currentTerm = rf.currentTerm + 1
+					//rf.votedFor = rf.me
 					rf.mu.Unlock()
 					rf.startElection()
 				}
@@ -571,7 +576,7 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 		rf.sendLogsToApplier()
 	} else {
 		if reply.Term > rf.currentTerm {
-			rf.changeToFollower()
+			rf.changeToFollower(rf.currentTerm, rf.votedFor)
 			return
 		}
 		//for condition: reply term > old term, but not new term

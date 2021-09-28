@@ -23,39 +23,55 @@ func (rf *Raft) getRoleL() Role {
 	return r
 }
 
-//if newTerm != -1 or votedFor != -1, update
-func (rf *Raft) changeToFollower() {
+func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
 	rf.role = Follower
 	rf.setNewElectionPoint()
-	//if newTerm != -1 {
-	//	rf.currentTerm = newTerm
-	//}
-	//if votedFor != -1 {
-	//	rf.votedFor = votedFor
-	//}
-	//if newTerm != -1 || votedFor != -1 {
-	//	go rf.persist()
-	//}
+	needPersist := false
+	if rf.currentTerm != newTerm {
+		rf.currentTerm = newTerm
+		needPersist = true
+	}
+	if votedFor != rf.votedFor {
+		rf.votedFor = votedFor
+		needPersist = true
+	}
+	if needPersist {
+		go rf.persist()
+	}
 }
 
-func (rf *Raft) changeToCandidate() {
+func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 	rf.setNewElectionPoint()
 	rf.role = Candidate
-	//if newTerm != -1 {
-	//	rf.currentTerm = newTerm
-	//}
-	//if votedFor != -1 {
-	//	rf.votedFor = votedFor
-	//}
-	//if newTerm != -1 || votedFor != -1 {
-	//	go rf.persist()
-	//}
+	needPersist := false
+	if rf.currentTerm != newTerm {
+		rf.currentTerm = newTerm
+		needPersist = true
+	}
+	if votedFor != rf.votedFor {
+		rf.votedFor = votedFor
+		needPersist = true
+	}
+	if needPersist {
+		go rf.persist()
+	}
 }
 
 func (rf *Raft) changeToLeader() {
 	rf.role = Leader
 	//rf.timeStart = time.Now()
 	rf.setNewElectionPoint()
+}
+
+//
+func (rf *Raft) appendLog(entry *LogEntry) {
+	rf.log = append(rf.log, *entry)
+	go rf.persist()
+}
+
+func (rf *Raft) appendLogs(entrys []LogEntry) {
+	rf.log = append(rf.log, entrys...)
+	go rf.persist()
 }
 
 func (rf *Raft) getLogSliceIdx(i int) int {
@@ -71,6 +87,7 @@ func randomElectionTimeOut() time.Duration {
 	return time.Duration(rand.Int31n(150)+150) * time.Millisecond
 }
 
+//
 func roleStr(i Role) string {
 	if i == Follower {
 		return "Follower"
