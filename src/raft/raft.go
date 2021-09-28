@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"6.824/labgob"
+	"bytes"
 	"fmt"
 	//	"bytes"
 	"sync"
@@ -39,8 +41,8 @@ const (
 	Candidate
 )
 
-const hbTimeOut = time.Millisecond * 1500
-const hbPeriod = time.Millisecond * 500
+//const hbTimeOut = time.Millisecond * 1500
+//const hbPeriod = time.Millisecond * 500
 
 //TOdo use context to stop routine
 
@@ -70,13 +72,11 @@ type Raft struct {
 	matchIdx []int64
 
 	//ticker
-	timeStart     time.Time
-	timeOutPeriod time.Duration
+	electioTimePoint time.Time
 
 	//Applier
 	applierCh chan ApplyMsg
 
-	//LogWorker
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -99,6 +99,15 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
+	rf.mu.Lock()
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	rf.mu.Unlock()
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 	// Your code here (2C).
 	// Example:
 	// w := new(bytes.Buffer)
@@ -135,9 +144,31 @@ func (rf *Raft) readPersist(data []byte) {
 			rf.nextIdx = append(rf.nextIdx, 1)
 			rf.matchIdx = append(rf.matchIdx, 0)
 		}
-		rf.timeStart = time.Now()
-		rf.timeOutPeriod = hbTimeOut
+		rf.setNewElectionPoint()
 		return
+	}
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	var currentTerm int64
+	var votedFor int
+	var log []LogEntry
+	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
+
+	} else {
+		rf.role = Follower
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+		rf.dead = 0
+		rf.commitIdx = 0
+		rf.lastApplied = 0
+		rf.nextIdx = make([]int64, 0, 0)
+		rf.matchIdx = make([]int64, 0, 0)
+		for i := 0; i < len(rf.peers); i++ {
+			rf.nextIdx = append(rf.nextIdx, 1)
+			rf.matchIdx = append(rf.matchIdx, 0)
+		}
+		rf.setNewElectionPoint()
 	}
 	// Your code here (2C).
 	// Example:
@@ -209,6 +240,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.changeToFollower()
 		rf.votedFor = -1
 		rf.currentTerm = args.Term
+		//rf.persist()
 	}
 
 	lastLog := rf.log[len(rf.log)-1]
@@ -218,7 +250,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.changeToFollower()
 		reply.Term = rf.currentTerm
 		reply.VoteGrant = true
-		rf.timeStart = time.Now()
 	} else {
 		reply.Term = rf.currentTerm
 		reply.VoteGrant = false
@@ -330,7 +361,6 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	//reset term
 	if args.Term >= rf.currentTerm {
 		rf.changeToFollower()
-		rf.timeStart = time.Now()
 		if args.Term > rf.currentTerm {
 			rf.currentTerm = args.Term
 			rf.votedFor = -1
@@ -439,33 +469,31 @@ func (rf *Raft) ticker() {
 	for rf.killed() == false {
 		rf.mu.Lock()
 		role := rf.role
-		timeOut := rf.timeOutPeriod
-		timeStart := rf.timeStart
+		electionTimePoint := rf.electioTimePoint
 		me := rf.me
 		rf.mu.Unlock()
 		if role == Leader {
 			rf.replicateLogs()
 		} else {
-			if time.Now().Sub(timeStart) > timeOut {
+			if time.Now().After(electionTimePoint) {
 				if role == Follower {
-					fmt.Println(fmt.Sprintf("%s %d heartbeat timeout ", roleStr(role), me))
+					fmt.Println(fmt.Sprintf("%s %d heartbeat timeout", roleStr(role), me))
 					rf.mu.Lock()
 					rf.changeToCandidate()
-					rf.timeStart = time.Now()
 					rf.mu.Unlock()
+					rf.startElection()
 				} else if role == Candidate {
 					rf.mu.Lock()
-					rf.timeStart = time.Now()
-					rf.timeOutPeriod = calculateElectionTimeOut()
+					rf.setNewElectionPoint()
 					rf.mu.Unlock()
-					//fmt.Println(fmt.Sprintf("%s %d election timeout",roleStr(role),me))
 					rf.startElection()
 				}
 			}
 		}
 		//fmt.Println(fmt.Sprintf("%d sleep %s",rf.me,rf.getTimeOutL()))
-		timeOut = rf.getTimeOutL()
-		time.Sleep(timeOut)
+		//timeOut = rf.getTimeOutL()
+		//time.Sleep(timeOut)
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -484,10 +512,12 @@ func (rf *Raft) replicateLogs() {
 func (rf *Raft) replicateLog(peerIdx int) {
 	rf.mu.Lock()
 	role := rf.role
+
 	if role != Leader {
 		rf.mu.Unlock()
 		return
 	}
+
 	term := rf.currentTerm
 	me := rf.me
 	commitIdx := rf.commitIdx
@@ -503,6 +533,7 @@ func (rf *Raft) replicateLog(peerIdx int) {
 	if i < len(rf.log) {
 		entries = rf.log[i:len(rf.log)]
 	}
+	//fmt.Println("prev log: ", rf.nextIdx)
 	prevLog := rf.log[i-1]
 	rf.mu.Unlock()
 	args := &AppendEntryArgs{
@@ -527,11 +558,6 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 		return
 	}
 
-	if reply.Term > rf.currentTerm {
-		rf.changeToFollower()
-		return
-	}
-
 	if reply.Success {
 		newNextIdx := args.PrevLogIndex + int64(len(args.Entries)) + 1
 		newMatchIdx := args.PrevLogIndex + int64(len(args.Entries))
@@ -544,8 +570,15 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 		rf.leaderCommitLogs()
 		rf.sendLogsToApplier()
 	} else {
-		//todo 是否需要判断
-		rf.nextIdx[peerIdx] -= 1
+		if reply.Term > rf.currentTerm {
+			rf.changeToFollower()
+			return
+		}
+		//for condition: reply term > old term, but not new term
+		if !(reply.Term > args.Term) {
+			rf.nextIdx[peerIdx] -= 1
+		}
+		//if rf.nextIdx[peerIdx]
 		go rf.replicateLog(peerIdx)
 	}
 }
