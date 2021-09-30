@@ -293,6 +293,9 @@ func (rf *Raft) startElection() {
 	rf.mu.Lock()
 	//rf.currentTerm = rf.currentTerm + 1
 	//rf.votedFor = rf.me
+	if rf.role != Candidate {
+		return
+	}
 	currTerm := rf.currentTerm
 	me := rf.me
 	lastLog := rf.log[len(rf.log)-1]
@@ -323,6 +326,12 @@ func (rf *Raft) startElection() {
 				recVotes += 1
 				if recVotes > len(rf.peers)/2 && !finish {
 					finish = true
+					//Todo
+					//检查和当前term是否匹配，防止网络延迟，旧的term同意leader，但是新的term已经有新的leader，造成脑裂
+					if rf.currentTerm != currTerm {
+						return
+					}
+					//
 					rf.changeToLeader()
 					go rf.replicateLogs()
 					fmt.Println(fmt.Sprintf("%d becomes leader with term %d", rf.me, rf.currentTerm))
@@ -369,19 +378,28 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	if rf.log[len(rf.log)-1].Idx < args.PrevLogIndex {
 		reply.Term = rf.currentTerm
 		reply.Success = false
+		//fmt.Println("yyyy", rf.me, args.LeaderId, args.PrevLogIndex)
 		return
 	}
-	for len(rf.log) > 0 && rf.log[len(rf.log)-1].Idx > args.PrevLogIndex {
-		rf.log = rf.log[:len(rf.log)-1]
+	//不能直接用args.entry覆盖logs，防止有网络延迟，旧的请求把新请求添加的删除
+	ptr := len(rf.log) - 1
+	for ptr > 0 && rf.log[ptr].Idx > args.PrevLogIndex {
+		ptr--
 	}
-	if args.PrevLogTerm == rf.log[len(rf.log)-1].Term {
+	if args.PrevLogTerm == rf.log[ptr].Term {
 		reply.Term = rf.currentTerm
 		reply.Success = true
-		//for _, entry := range args.Entries {
-		//	rf.log = append(rf.log, entry)
-		//}
-		rf.appendLogs(args.Entries)
-		fmt.Println(fmt.Sprintf("%s %d append %v in log with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], rf.commitIdx, rf.lastApplied))
+		ptr++
+		for j := 0; j < len(args.Entries); j++ {
+			if ptr < len(rf.log) && rf.log[ptr].Idx == args.Entries[j].Idx && rf.log[ptr].Term == args.Entries[j].Term {
+				ptr++
+			} else {
+				rf.log = rf.log[:ptr]
+				rf.appendLogs(args.Entries[j:])
+				break
+			}
+		}
+		fmt.Println(fmt.Sprintf("%s %d append %v from %d in log with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], args.LeaderId, rf.commitIdx, rf.lastApplied))
 		//progress commitIdx //
 		if args.LeaderCommit > rf.commitIdx {
 			rf.commitIdx = min(args.LeaderCommit, rf.log[len(rf.log)-1].Idx)
@@ -389,9 +407,10 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		}
 		return
 	} else {
-		rf.log = rf.log[:len(rf.log)-1]
+		rf.log = rf.log[:ptr]
 		reply.Term = rf.currentTerm
 		reply.Success = false
+		//fmt.Println("yyyy", rf.me, args.LeaderId, args.PrevLogIndex)
 		return
 	}
 }
@@ -580,8 +599,10 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 			return
 		}
 		//for condition: reply term > old term, but not new term
-		if !(reply.Term > args.Term) {
+		//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
+		if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
 			rf.nextIdx[peerIdx] -= 1
+			//fmt.Println("xxxxx", rf.me, peerIdx, rf.nextIdx[peerIdx])
 		}
 		//if rf.nextIdx[peerIdx]
 		go rf.replicateLog(peerIdx)
@@ -610,7 +631,7 @@ func (rf *Raft) leaderCommitLogs() {
 				break
 			}
 			rf.commitIdx = logEntry.Idx
-			fmt.Println(fmt.Sprintf("%s %d commit %s", roleStr(rf.role), rf.me, rf.log[i].Command))
+			fmt.Println(fmt.Sprintf("%s %d commit %v", roleStr(rf.role), rf.me, rf.log[i]))
 		}
 	}
 }
@@ -627,7 +648,7 @@ func (rf *Raft) sendLogsToApplier() {
 		if rf.log[i].Idx > rf.lastApplied {
 			rf.lastApplied = rf.log[i].Idx
 		}
-		fmt.Println(fmt.Sprintf("%s %d apply %s with commitIdx %d, lastApplied %d", roleStr(rf.role), rf.me, rf.log[i].Command, rf.commitIdx, rf.lastApplied))
+		fmt.Println(fmt.Sprintf("%s %d apply %v with commitIdx %d, lastApplied %d", roleStr(rf.role), rf.me, rf.log[i], rf.commitIdx, rf.lastApplied))
 		i++
 	}
 }
