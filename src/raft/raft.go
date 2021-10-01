@@ -41,9 +41,6 @@ const (
 	Candidate
 )
 
-//const hbTimeOut = time.Millisecond * 1500
-//const hbPeriod = time.Millisecond * 500
-
 //TOdo use context to stop routine
 
 //
@@ -76,10 +73,7 @@ type Raft struct {
 
 	//Applier
 	applierCh chan ApplyMsg
-
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
+	applyCond *sync.Cond
 }
 
 // return currentTerm and whether this server
@@ -98,24 +92,41 @@ func (rf *Raft) GetState() (int, bool) {
 // where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
 //
-func (rf *Raft) persist() {
-	rf.mu.Lock()
+func (rf *Raft) persistState() {
+	currTerm := rf.currentTerm
+	votedFor := rf.votedFor
+	log := rf.log
 	w := new(bytes.Buffer)
 	e := labgob.NewEncoder(w)
-	e.Encode(rf.currentTerm)
-	e.Encode(rf.votedFor)
-	e.Encode(rf.log)
-	rf.mu.Unlock()
+	e.Encode(currTerm)
+	e.Encode(votedFor)
+	e.Encode(log)
 	data := w.Bytes()
 	rf.persister.SaveRaftState(data)
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+}
+
+func (rf *Raft) persistStateL() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.persistState()
+}
+
+func (rf *Raft) persistStateAndSnapshot(snapshotByte []byte) {
+	currTerm := rf.currentTerm
+	votedFor := rf.votedFor
+	log := rf.log
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(currTerm)
+	e.Encode(votedFor)
+	e.Encode(log)
+	stateByte := w.Bytes()
+	rf.persister.SaveStateAndSnapshot(stateByte, snapshotByte)
+}
+func (rf *Raft) persistStateAndSnapshotL(snapshotByte []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.persistStateAndSnapshot(snapshotByte)
 }
 
 //
@@ -155,34 +166,22 @@ func (rf *Raft) readPersist(data []byte) {
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
 
 	} else {
+		//Todo put the first log as last include idx term, directly update nextidx lastApplied?
 		rf.role = Follower
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
 		rf.log = log
 		rf.dead = 0
 		rf.commitIdx = 0
-		rf.lastApplied = 0
+		rf.lastApplied = rf.log[0].Idx
 		rf.nextIdx = make([]int64, 0, 0)
 		rf.matchIdx = make([]int64, 0, 0)
 		for i := 0; i < len(rf.peers); i++ {
-			rf.nextIdx = append(rf.nextIdx, 1)
+			rf.nextIdx = append(rf.nextIdx, rf.log[0].Idx+1)
 			rf.matchIdx = append(rf.matchIdx, 0)
 		}
 		rf.setNewElectionPoint()
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
 }
 
 //
@@ -192,8 +191,32 @@ func (rf *Raft) readPersist(data []byte) {
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 
 	// Your code here (2D).
-
-	return true
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	fmt.Println("CondInstall start", roleStr(rf.role), rf.me, "lastIDx", lastIncludedIndex)
+	//lastSnapShotLog := rf.log[0]
+	//if lastIncludedIndex >= int(lastSnapShotLog.Idx) { //Todo 是不是应该比较last Snapshot Idx？
+	if lastIncludedIndex >= int(rf.lastApplied) {
+		rf.persistStateAndSnapshot(snapshot)
+		//rf.mu.Lock()
+		//defer rf.mu.Unlock()
+		if lastIncludedIndex <= int(rf.log[len(rf.log)-1].Idx) {
+			i := getLogSliceIdx(rf.log, lastIncludedIndex)
+			rf.log = rf.log[i:] //first one is always previous log
+		} else {
+			rf.log = []LogEntry{
+				{
+					nil,
+					int64(lastIncludedTerm),
+					int64(lastIncludedIndex),
+				},
+			}
+		}
+		rf.lastApplied = int64(lastIncludedIndex) //Todo ????
+		return true
+	} else {
+		return false
+	}
 }
 
 // the service says it has created a snapshot that has
@@ -201,8 +224,103 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 // service no longer needs the log through (and including)
 // that index. Raft should now trim its log as much as possible.
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
-	// Your code here (2D).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	lastSnapShotLog := rf.log[0]
+	fmt.Println("Snapshot start", roleStr(rf.role), rf.me, "index", index)
+	if index > int(lastSnapShotLog.Idx) {
+		rf.persistStateAndSnapshot(snapshot)
+		//rf.mu.Lock()
+		//defer rf.mu.Unlock()
+		i := getLogSliceIdx(rf.log, index)
+		lastIncludedIdx := rf.log[i].Idx
+		lastIncludedTerm := rf.log[i].Term
+		rf.log = rf.log[i:] //first one is always previous log
+		//send SnapShot
+		//fmt.Println("yyyy SnapShot", roleStr(rf.role), rf.me, "lastIDx", lastIncludedIdx)
+		if rf.role == Leader {
+			rf.installSnapshotToPeers(lastIncludedIdx, lastIncludedTerm, snapshot)
+		}
+	}
 
+}
+
+type InstallSnapshotArgs struct {
+	Term            int64
+	LeaderId        int
+	LastIncludeIdx  int64
+	LastIncludeTerm int64
+	Data            []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int64
+}
+
+func (rf *Raft) installSnapshotToPeers(lastIncludedIndex int64, lastIncludedTerm int64, data []byte) {
+	for idx, _ := range rf.peers {
+		idx := idx
+		if idx == rf.me {
+			continue
+		}
+		go rf.installSnapshotToPeer(idx, lastIncludedIndex, lastIncludedTerm, data)
+	}
+}
+
+func (rf *Raft) installSnapshotToPeer(peer int, lastIncludedIndex int64, lastIncludedTerm int64, data []byte) {
+	rf.mu.Lock()
+	if lastIncludedIndex < rf.log[0].Idx {
+		rf.mu.Unlock()
+		return
+	}
+	currTerm := rf.currentTerm
+	leaderId := rf.me
+	rf.mu.Unlock()
+	args := &InstallSnapshotArgs{
+		currTerm,
+		leaderId,
+		lastIncludedIndex,
+		lastIncludedTerm,
+		data,
+	}
+	reply := &InstallSnapshotReply{}
+	ok := rf.SendInstallSnapshot(peer, args, reply)
+	if ok {
+		rf.mu.Lock()
+		defer rf.mu.Unlock()
+		if reply.Term > rf.currentTerm {
+			rf.changeToFollower(reply.Term, -1)
+		}
+	} else {
+		rf.installSnapshotToPeer(peer, lastIncludedIndex, lastIncludedTerm, data)
+	}
+}
+
+func (rf *Raft) SendInstallSnapshot(server int, args *InstallSnapshotArgs, reply *InstallSnapshotReply) bool {
+	ok := rf.peers[server].Call("Raft.InstallSnapshot", args, reply)
+	return ok
+}
+
+func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapshotReply) {
+	rf.mu.Lock()
+	if args.Term < rf.currentTerm {
+		rf.mu.Unlock()
+		reply.Term = rf.currentTerm
+		return
+	}
+	if args.Term > rf.currentTerm {
+		rf.changeToFollower(args.Term, -1)
+	}
+	currTerm := rf.currentTerm
+	rf.mu.Unlock()
+	rf.applierCh <- ApplyMsg{
+		SnapshotValid: true,
+		SnapshotTerm:  int(args.LastIncludeTerm),
+		SnapshotIndex: int(args.LastIncludeIdx),
+		Snapshot:      args.Data,
+	}
+	reply.Term = currTerm
+	return
 }
 
 //
@@ -235,7 +353,6 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		return
 	}
 
-	//fmt.Println(fmt.Sprintf("%d with term %d to %d with term %d", rf.me, rf.currentTerm, args.CandidateId, args.Term))
 	if args.Term > rf.currentTerm {
 		rf.changeToFollower(args.Term, -1)
 	}
@@ -291,16 +408,16 @@ func (rf *Raft) startElection() {
 	ch := make(chan bool)
 	defer close(ch)
 	rf.mu.Lock()
-	//rf.currentTerm = rf.currentTerm + 1
-	//rf.votedFor = rf.me
 	if rf.role != Candidate {
+		rf.mu.Unlock()
 		return
 	}
 	currTerm := rf.currentTerm
 	me := rf.me
 	lastLog := rf.log[len(rf.log)-1]
-	rf.mu.Unlock()
 	fmt.Println(fmt.Sprintf("%d start election with term %d ", rf.me, rf.currentTerm))
+	rf.mu.Unlock()
+	//
 
 	recVotes := 1
 	finish := false
@@ -320,21 +437,27 @@ func (rf *Raft) startElection() {
 			reply := &RequestVoteReply{}
 			//todo term to higher
 			ok := rf.sendRequestVote(idx, args, reply)
-			if ok && reply.VoteGrant {
+			if ok {
 				rf.mu.Lock()
 				defer rf.mu.Unlock()
-				recVotes += 1
-				if recVotes > len(rf.peers)/2 && !finish {
-					finish = true
-					//Todo
-					//检查和当前term是否匹配，防止网络延迟，旧的term同意leader，但是新的term已经有新的leader，造成脑裂
-					if rf.currentTerm != currTerm {
-						return
+				if reply.VoteGrant {
+					//rf.mu.Lock()
+					//defer rf.mu.Unlock()
+					recVotes += 1
+					if recVotes > len(rf.peers)/2 && !finish {
+						finish = true
+						//Todo
+						//检查和当前term是否匹配，防止网络延迟，旧的term同意leader，但是新的term已经有新的leader，造成脑裂
+						if rf.currentTerm != currTerm {
+							return
+						}
+						//
+						rf.changeToLeader()
+						go rf.replicateLogs()
+						fmt.Println(fmt.Sprintf("%d becomes leader with term %d", rf.me, rf.currentTerm))
 					}
-					//
-					rf.changeToLeader()
-					go rf.replicateLogs()
-					fmt.Println(fmt.Sprintf("%d becomes leader with term %d", rf.me, rf.currentTerm))
+				} else if reply.Term > rf.currentTerm {
+					rf.changeToFollower(reply.Term, -1)
 				}
 			}
 		}()
@@ -360,7 +483,6 @@ type AppendEntryReply struct {
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
 	//fmt.Println(fmt.Sprintf("%s %d receive appendEntry from %d", roleStr(rf.role), rf.me, args.LeaderId))
 	//reset term
 	if args.Term >= rf.currentTerm {
@@ -374,17 +496,26 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		reply.Success = false
 		return
 	}
-	//fmt.Println("rec Append Entry with curr commit idx", rf.commitIdx)
+
 	if rf.log[len(rf.log)-1].Idx < args.PrevLogIndex {
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		//fmt.Println("yyyy", rf.me, args.LeaderId, args.PrevLogIndex)
 		return
 	}
 	//不能直接用args.entry覆盖logs，防止有网络延迟，旧的请求把新请求添加的删除
-	ptr := len(rf.log) - 1
-	for ptr > 0 && rf.log[ptr].Idx > args.PrevLogIndex {
-		ptr--
+	var ptr int
+	if args.PrevLogIndex >= rf.log[0].Idx {
+		ptr = getLogSliceIdx(rf.log, int(args.PrevLogIndex))
+	} else {
+		args.PrevLogIndex = rf.log[0].Idx
+		args.PrevLogTerm = rf.log[0].Term
+		ptr = 0
+		if args.Entries != nil && args.Entries[len(args.Entries)-1].Idx > args.PrevLogIndex {
+			i := getLogSliceIdx(args.Entries, int(args.PrevLogIndex))
+			args.Entries = args.Entries[i+1:]
+		} else {
+			args.Entries = nil
+		}
 	}
 	if args.PrevLogTerm == rf.log[ptr].Term {
 		reply.Term = rf.currentTerm
@@ -396,14 +527,13 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			} else {
 				rf.log = rf.log[:ptr]
 				rf.appendLogs(args.Entries[j:])
+				fmt.Println(fmt.Sprintf("%s %d append %v from %d in log %v with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, args.Entries[j:], args.LeaderId, rf.log, rf.commitIdx, rf.lastApplied))
 				break
 			}
 		}
-		fmt.Println(fmt.Sprintf("%s %d append %v from %d in log with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], args.LeaderId, rf.commitIdx, rf.lastApplied))
-		//progress commitIdx //
 		if args.LeaderCommit > rf.commitIdx {
 			rf.commitIdx = min(args.LeaderCommit, rf.log[len(rf.log)-1].Idx)
-			rf.sendLogsToApplier()
+			rf.signalApplier()
 		}
 		return
 	} else {
@@ -436,27 +566,164 @@ func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	if rf.getRoleL() != Leader {
-		return -1, -1, false
-	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if rf.role != Leader {
+		return -1, -1, false
+	}
 	prevLog := rf.log[len(rf.log)-1]
 	newIdx := prevLog.Idx + 1
 	term := rf.currentTerm
-	//rf.log = append(rf.log, LogEntry{
-	//	Command: command,
-	//	Term:    term,
-	//	Idx:     newIdx,
-	//})
 	rf.appendLog(&LogEntry{
 		Command: command,
 		Term:    term,
 		Idx:     newIdx,
 	})
-	fmt.Println(fmt.Sprintf("%s %d append %v in log with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], rf.commitIdx, rf.lastApplied))
+	fmt.Println(fmt.Sprintf("%s %d append %v in log %v with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], rf.log, rf.commitIdx, rf.lastApplied))
 	rf.replicateLogs()
 	return int(newIdx), int(term), true
+}
+
+//logworker receive command from channel
+func (rf *Raft) replicateLogs() {
+	//fmt.Println("start replicate with commit idx", rf.commitIdx)
+	for idx, _ := range rf.peers {
+		idx := idx
+		if idx == rf.me {
+			continue
+		}
+		go rf.replicateLog(idx)
+	}
+}
+
+func (rf *Raft) replicateLog(peerIdx int) {
+	rf.mu.Lock()
+	role := rf.role
+	if role != Leader {
+		rf.mu.Unlock()
+		return
+	}
+	term := rf.currentTerm
+	me := rf.me
+	commitIdx := rf.commitIdx
+	peerNextIdx := rf.nextIdx[peerIdx]
+	lastIncludedIdx := rf.log[0].Idx
+	var entries []LogEntry
+	var prevLog LogEntry
+	if peerNextIdx <= lastIncludedIdx {
+		rf.nextIdx[peerIdx] = lastIncludedIdx + 1
+		peerNextIdx = lastIncludedIdx + 1
+	}
+	i := getLogSliceIdx(rf.log, int(peerNextIdx))
+	//peer catch up, maybe hb condition
+	if i < len(rf.log) {
+		entries = rf.log[i:]
+	}
+	prevLog = rf.log[i-1]
+
+	rf.mu.Unlock()
+	args := &AppendEntryArgs{
+		Term:         term,
+		LeaderId:     me,
+		PrevLogIndex: prevLog.Idx,
+		PrevLogTerm:  prevLog.Term,
+		LeaderCommit: commitIdx,
+		Entries:      entries,
+	}
+	reply := &AppendEntryReply{}
+	ok := rf.SendAppendEntry(peerIdx, args, reply)
+	rf.ProcessAppendEntryReply(peerIdx, ok, args, reply)
+}
+
+func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryArgs, reply *AppendEntryReply) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.role != Leader {
+		return
+	}
+
+	if !ok {
+		go rf.replicateLog(peerIdx)
+		return
+	}
+
+	if reply.Success {
+		newNextIdx := args.PrevLogIndex + int64(len(args.Entries)) + 1
+		newMatchIdx := args.PrevLogIndex + int64(len(args.Entries))
+		if newNextIdx > rf.nextIdx[peerIdx] {
+			rf.nextIdx[peerIdx] = newNextIdx
+		}
+		if newMatchIdx > rf.matchIdx[peerIdx] {
+			rf.matchIdx[peerIdx] = newMatchIdx
+		}
+		rf.leaderCommitLogs()
+		rf.signalApplier()
+	} else {
+		if reply.Term > rf.currentTerm {
+			rf.changeToFollower(rf.currentTerm, rf.votedFor)
+			return
+		}
+		//for condition: reply term > old term, but not new term
+		//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
+		if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
+			rf.nextIdx[peerIdx] -= 1
+			//fmt.Println("xxxxx", rf.me, peerIdx, rf.nextIdx[peerIdx])
+		}
+		//if rf.nextIdx[peerIdx]
+		go rf.replicateLog(peerIdx)
+	}
+}
+
+//
+func (rf *Raft) leaderCommitLogs() {
+	//TODO match里面最小超过n/2的
+	for i := len(rf.log) - 1; i >= 0; i-- {
+		logEntry := rf.log[i]
+		matches := 1
+		for _, matchIdx := range rf.matchIdx {
+			if matchIdx >= logEntry.Idx {
+				matches++
+			}
+			if matches > len(rf.peers)/2 {
+				break
+			}
+		}
+		if matches > len(rf.peers)/2 {
+			if logEntry.Term != rf.currentTerm || rf.commitIdx >= logEntry.Idx {
+				break
+			}
+			rf.commitIdx = logEntry.Idx
+			fmt.Println(fmt.Sprintf("%s %d commit %v", roleStr(rf.role), rf.me, rf.log[i]))
+		}
+	}
+}
+
+func (rf *Raft) signalApplier() {
+	rf.applyCond.Broadcast()
+}
+
+//Todo more reasonable method
+func (rf *Raft) applier() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	for !rf.killed() {
+		if rf.lastApplied+1 <= rf.commitIdx {
+			i := getLogSliceIdx(rf.log, int(rf.lastApplied)) + 1
+			rf.lastApplied++
+			//fmt.Println("xxxxx ", rf.log, rf.lastApplied, rf.commitIdx)
+			applyMsg := ApplyMsg{
+				CommandValid: true,
+				Command:      rf.log[i].Command,
+				CommandIndex: int(rf.log[i].Idx),
+			}
+			//fmt.Println(fmt.Sprintf("%s %d apply %v with commitIdx %d, lastApplied %d", roleStr(rf.role), rf.me, rf.log[i], rf.commitIdx, rf.lastApplied))
+			rf.mu.Unlock()
+			rf.applierCh <- applyMsg
+			rf.mu.Lock()
+		} else {
+			rf.applyCond.Wait()
+		}
+	}
 }
 
 //
@@ -482,8 +749,6 @@ func (rf *Raft) killed() bool {
 
 // The ticker go routine starts a new election if this peer hasn't received
 // heartsbeats recently.
-//todo timeout 可不可以不用
-//TOdo 发生了太多次term增加
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
 		rf.mu.Lock()
@@ -499,157 +764,17 @@ func (rf *Raft) ticker() {
 					fmt.Println(fmt.Sprintf("%s %d heartbeat timeout", roleStr(role), me))
 					rf.mu.Lock()
 					rf.changeToCandidate(rf.currentTerm+1, rf.me)
-					//rf.currentTerm = rf.currentTerm + 1
-					//rf.votedFor = rf.me
 					rf.mu.Unlock()
 					rf.startElection()
 				} else if role == Candidate {
 					rf.mu.Lock()
 					rf.changeToCandidate(rf.currentTerm+1, rf.me)
-					//rf.setNewElectionPoint()
-					//rf.currentTerm = rf.currentTerm + 1
-					//rf.votedFor = rf.me
 					rf.mu.Unlock()
 					rf.startElection()
 				}
 			}
 		}
-		//fmt.Println(fmt.Sprintf("%d sleep %s",rf.me,rf.getTimeOutL()))
-		//timeOut = rf.getTimeOutL()
-		//time.Sleep(timeOut)
 		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-//logworker receive command from channel
-func (rf *Raft) replicateLogs() {
-	//fmt.Println("start replicate with commit idx", rf.commitIdx)
-	for idx, _ := range rf.peers {
-		idx := idx
-		if idx == rf.me {
-			continue
-		}
-		go rf.replicateLog(idx)
-	}
-}
-
-func (rf *Raft) replicateLog(peerIdx int) {
-	rf.mu.Lock()
-	role := rf.role
-
-	if role != Leader {
-		rf.mu.Unlock()
-		return
-	}
-
-	term := rf.currentTerm
-	me := rf.me
-	commitIdx := rf.commitIdx
-	//lastIdx := rf.log[len(rf.log)-1].Idx
-	peerNextIdx := rf.nextIdx[peerIdx]
-	//Todo 针对hb再处理，optimize
-	//if peerNextIdx > rf.log[len(rf.log)-1].Idx {
-	//	rf.mu.Unlock()
-	//	return
-	//}
-	var entries []LogEntry
-	i := rf.getLogSliceIdx(int(peerNextIdx))
-	if i < len(rf.log) {
-		entries = rf.log[i:len(rf.log)]
-	}
-	//fmt.Println("prev log: ", rf.nextIdx)
-	prevLog := rf.log[i-1]
-	rf.mu.Unlock()
-	args := &AppendEntryArgs{
-		Term:         term,
-		LeaderId:     me,
-		PrevLogIndex: prevLog.Idx,
-		PrevLogTerm:  prevLog.Term,
-		LeaderCommit: commitIdx,
-		Entries:      entries,
-	}
-	reply := &AppendEntryReply{}
-	ok := rf.SendAppendEntry(peerIdx, args, reply)
-	rf.ProcessAppendEntryReply(peerIdx, ok, args, reply)
-}
-
-func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryArgs, reply *AppendEntryReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	//
-	if !ok {
-		go rf.replicateLog(peerIdx)
-		return
-	}
-
-	if reply.Success {
-		newNextIdx := args.PrevLogIndex + int64(len(args.Entries)) + 1
-		newMatchIdx := args.PrevLogIndex + int64(len(args.Entries))
-		if newNextIdx > rf.nextIdx[peerIdx] {
-			rf.nextIdx[peerIdx] = newNextIdx
-		}
-		if newMatchIdx > rf.matchIdx[peerIdx] {
-			rf.matchIdx[peerIdx] = newMatchIdx
-		}
-		rf.leaderCommitLogs()
-		rf.sendLogsToApplier()
-	} else {
-		if reply.Term > rf.currentTerm {
-			rf.changeToFollower(rf.currentTerm, rf.votedFor)
-			return
-		}
-		//for condition: reply term > old term, but not new term
-		//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
-		if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
-			rf.nextIdx[peerIdx] -= 1
-			//fmt.Println("xxxxx", rf.me, peerIdx, rf.nextIdx[peerIdx])
-		}
-		//if rf.nextIdx[peerIdx]
-		go rf.replicateLog(peerIdx)
-	}
-}
-
-//
-func (rf *Raft) leaderCommitLogs() {
-	if rf.role != Leader {
-		return
-	}
-	//TODO match里面最小超过n/2的
-	for i := len(rf.log) - 1; i >= 0; i-- {
-		logEntry := rf.log[i]
-		matches := 1
-		for _, matchIdx := range rf.matchIdx {
-			if matchIdx >= logEntry.Idx {
-				matches++
-			}
-			if matches > len(rf.peers)/2 {
-				break
-			}
-		}
-		if matches > len(rf.peers)/2 {
-			if logEntry.Term != rf.currentTerm || rf.commitIdx >= logEntry.Idx {
-				break
-			}
-			rf.commitIdx = logEntry.Idx
-			fmt.Println(fmt.Sprintf("%s %d commit %v", roleStr(rf.role), rf.me, rf.log[i]))
-		}
-	}
-}
-
-func (rf *Raft) sendLogsToApplier() {
-	i := rf.getLogSliceIdx(int(rf.lastApplied)) + 1
-	j := rf.getLogSliceIdx(int(rf.commitIdx))
-	for i <= j {
-		rf.applierCh <- ApplyMsg{
-			CommandValid: true,
-			Command:      rf.log[i].Command,
-			CommandIndex: int(rf.log[i].Idx),
-		}
-		if rf.log[i].Idx > rf.lastApplied {
-			rf.lastApplied = rf.log[i].Idx
-		}
-		fmt.Println(fmt.Sprintf("%s %d apply %v with commitIdx %d, lastApplied %d", roleStr(rf.role), rf.me, rf.log[i], rf.commitIdx, rf.lastApplied))
-		i++
 	}
 }
 
@@ -668,6 +793,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
 	rf.mu = sync.RWMutex{}
+	rf.applyCond = sync.NewCond(&rf.mu)
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
@@ -679,6 +805,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// start ticker goroutine to start elections
 	go rf.ticker()
+	go rf.applier()
 
 	return rf
 }

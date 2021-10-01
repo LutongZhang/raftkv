@@ -203,6 +203,7 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 			err_msg, prevok := cfg.checkLogs(i, m)
 			cfg.mu.Unlock()
 			if m.CommandIndex > 1 && prevok == false {
+				fmt.Println("map: ", cfg.logs[i])
 				err_msg = fmt.Sprintf("server %v apply out of order %v", i, m.CommandIndex)
 			}
 			if err_msg != "" {
@@ -225,7 +226,6 @@ func (cfg *config) applierSnap(i int, applyCh chan ApplyMsg) {
 			// depending on the Raft implementation, but
 			// just in case.
 			// DPrintf("Ignore: Index %v lastApplied %v\n", m.CommandIndex, lastApplied)
-
 		}
 	}
 }
@@ -519,18 +519,19 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			if rf != nil {
 				index1, _, ok := rf.Start(cmd)
 				if ok {
+					//fmt.Println("yyyyy", cmd)
 					index = index1
 					break
 				}
 			}
 		}
-
 		if index != -1 {
 			// somebody claimed to be the leader and to have
 			// submitted our command; wait a while for agreement.
 			t1 := time.Now()
 			for time.Since(t1).Seconds() < 2 {
 				nd, cmd1 := cfg.nCommitted(index)
+				//fmt.Println("command: ", cmd, "idx: ", index, "nd: ", nd, "expected: ", expectedServers)
 				if nd > 0 && nd >= expectedServers {
 					// committed
 					if cmd1 == cmd {
@@ -547,6 +548,9 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
+	fmt.Println("0 server ", cfg.logs[0])
+	fmt.Println("1 server ", cfg.logs[1])
+	fmt.Println("2 server ", cfg.logs[2])
 	cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
 	return -1
 }

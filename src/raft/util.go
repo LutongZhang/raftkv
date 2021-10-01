@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -24,6 +25,9 @@ func (rf *Raft) getRoleL() Role {
 }
 
 func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
+	if rf.role == Leader {
+		fmt.Println(fmt.Sprintf("%s %d change to follower", roleStr(rf.role), rf.me))
+	}
 	rf.role = Follower
 	rf.setNewElectionPoint()
 	needPersist := false
@@ -36,7 +40,7 @@ func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		go rf.persist()
+		go rf.persistStateL()
 	}
 }
 
@@ -53,7 +57,7 @@ func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		go rf.persist()
+		go rf.persistStateL()
 	}
 }
 
@@ -66,16 +70,16 @@ func (rf *Raft) changeToLeader() {
 //
 func (rf *Raft) appendLog(entry *LogEntry) {
 	rf.log = append(rf.log, *entry)
-	go rf.persist()
+	go rf.persistStateL()
 }
 
 func (rf *Raft) appendLogs(entrys []LogEntry) {
 	rf.log = append(rf.log, entrys...)
-	go rf.persist()
+	go rf.persistStateL()
 }
 
-func (rf *Raft) getLogSliceIdx(i int) int {
-	return len(rf.log) - (int(rf.log[len(rf.log)-1].Idx) - i + 1)
+func getLogSliceIdx(log []LogEntry, i int) int {
+	return len(log) - (int(log[len(log)-1].Idx) - i + 1)
 }
 
 //
