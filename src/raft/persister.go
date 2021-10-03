@@ -9,7 +9,11 @@ package raft
 // test with the original before submitting.
 //
 
-import "sync"
+import (
+	"6.824/labgob"
+	"bytes"
+	"sync"
+)
 
 type Persister struct {
 	mu        sync.Mutex
@@ -73,4 +77,47 @@ func (ps *Persister) SnapshotSize() int {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	return len(ps.snapshot)
+}
+
+//Persist util
+//
+// save Raft's persistent state to stable storage,
+// where it can later be retrieved after a crash and restart.
+// see paper's Figure 2 for a description of what should be persistent.
+//
+func (rf *Raft) persistState() {
+	currTerm := rf.currentTerm
+	votedFor := rf.votedFor
+	log := rf.log
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(currTerm)
+	e.Encode(votedFor)
+	e.Encode(log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
+}
+
+func (rf *Raft) persistStateL() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.persistState()
+}
+
+func (rf *Raft) persistStateAndSnapshot(snapshotByte []byte) {
+	currTerm := rf.currentTerm
+	votedFor := rf.votedFor
+	log := rf.log
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(currTerm)
+	e.Encode(votedFor)
+	e.Encode(log)
+	stateByte := w.Bytes()
+	rf.persister.SaveStateAndSnapshot(stateByte, snapshotByte)
+}
+func (rf *Raft) persistStateAndSnapshotL(snapshotByte []byte) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.persistStateAndSnapshot(snapshotByte)
 }

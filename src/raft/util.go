@@ -78,14 +78,15 @@ func (rf *Raft) appendLogs(entrys []LogEntry) {
 	go rf.persistStateL()
 }
 
-func getLogSliceIdx(log []LogEntry, i int) int {
-	return len(log) - (int(log[len(log)-1].Idx) - i + 1)
-}
-
 //
 func (rf *Raft) setNewElectionPoint() {
 	rf.electioTimePoint = time.Now().Add(randomElectionTimeOut())
 }
+
+func getLogSliceIdx(log []LogEntry, i int) int {
+	return len(log) - (int(log[len(log)-1].Idx) - i + 1)
+}
+
 func randomElectionTimeOut() time.Duration {
 	//old 150+150
 	return time.Duration(rand.Int31n(150)+150) * time.Millisecond
