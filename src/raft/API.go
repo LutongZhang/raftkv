@@ -1,14 +1,12 @@
 package raft
 
-import "fmt"
-
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	var term = int(rf.currentTerm)
 	var isleader = rf.role == Leader
-	rf.mu.Unlock()
 	// Your code here (2A).
 	return term, isleader
 }
@@ -41,7 +39,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		Term:    term,
 		Idx:     newIdx,
 	})
-	fmt.Println(fmt.Sprintf("%s %d append %v in log %v with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, rf.log[len(rf.log)-1], rf.log, rf.commitIdx, rf.lastApplied))
+	rf.log_infof("append %v with with commitIdx %d lastApplied %d",rf.log[len(rf.log)-1],rf.commitIdx, rf.lastApplied)
 	rf.replicateLogs()
 	return int(newIdx), int(term), true
 }
@@ -54,17 +52,14 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	lastSnapShotLog := rf.log[0]
-	fmt.Println("Snapshot start", roleStr(rf.role), rf.me, "index", index)
+	rf.log_infof("snapshot start with idx %d",index)
 	if index > int(lastSnapShotLog.Idx) {
 		rf.persistStateAndSnapshot(snapshot)
-		//rf.mu.Lock()
-		//defer rf.mu.Unlock()
 		i := getLogSliceIdx(rf.log, index)
 		lastIncludedIdx := rf.log[i].Idx
 		lastIncludedTerm := rf.log[i].Term
 		rf.log = rf.log[i:] //first one is always previous log
 		//send SnapShot
-		//fmt.Println("yyyy SnapShot", roleStr(rf.role), rf.me, "lastIDx", lastIncludedIdx)
 		if rf.role == Leader {
 			rf.installSnapshotToPeers(lastIncludedIdx, lastIncludedTerm, snapshot)
 		}
@@ -80,10 +75,11 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	fmt.Println("CondInstall start", roleStr(rf.role), rf.me, "lastIDx", lastIncludedIndex)
 	//lastSnapShotLog := rf.log[0]
 	//if lastIncludedIndex >= int(lastSnapShotLog.Idx) { //Todo 是不是应该比较last Snapshot Idx？
 	if lastIncludedIndex >= int(rf.lastApplied) {
+		rf.log_infof("CondInstall start with last term %d last idx %d",lastIncludedTerm,lastIncludedIndex )
+		rf.lastApplied = int64(lastIncludedIndex) //Todo ????
 		rf.persistStateAndSnapshot(snapshot)
 		//rf.mu.Lock()
 		//defer rf.mu.Unlock()
@@ -99,7 +95,14 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 				},
 			}
 		}
-		rf.lastApplied = int64(lastIncludedIndex) //Todo ????
+		for i := range rf.peers {
+			if rf.nextIdx[i] <= int64(lastIncludedIndex) {
+				rf.nextIdx[i] = int64(lastIncludedIndex) + 1
+			}
+			if rf.matchIdx[i] < int64(lastIncludedIndex) {
+				rf.matchIdx[i] = int64(lastIncludedIndex)
+			}
+		}
 		return true
 	} else {
 		return false

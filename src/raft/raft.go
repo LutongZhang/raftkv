@@ -3,7 +3,6 @@ package raft
 import (
 	"6.824/labgob"
 	"bytes"
-	"fmt"
 	//	"bytes"
 	"sync"
 	"sync/atomic"
@@ -44,7 +43,6 @@ type Raft struct {
 	currentTerm int64
 	votedFor    int
 	log         []LogEntry
-
 	//Log
 	commitIdx   int64
 	lastApplied int64
@@ -96,7 +94,6 @@ func (rf *Raft) readPersist(data []byte) {
 	var votedFor int
 	var log []LogEntry
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
-
 	} else {
 		//Todo put the first log as last include idx term, directly update nextidx lastApplied?
 		rf.role = Follower
@@ -120,21 +117,19 @@ func (rf *Raft) signalApplier() {
 	rf.applyCond.Broadcast()
 }
 
-//Todo more reasonable method
 func (rf *Raft) applier() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	for !rf.killed() {
 		if rf.lastApplied+1 <= rf.commitIdx {
 			i := getLogSliceIdx(rf.log, int(rf.lastApplied)) + 1
-			rf.lastApplied++
-			//fmt.Println("xxxxx ", rf.log, rf.lastApplied, rf.commitIdx)
+			//rf.log_infof("apply log %v",rf.log[i])
+			rf.lastApplied+=1
 			applyMsg := ApplyMsg{
 				CommandValid: true,
 				Command:      rf.log[i].Command,
 				CommandIndex: int(rf.log[i].Idx),
 			}
-			//fmt.Println(fmt.Sprintf("%s %d apply %v with commitIdx %d, lastApplied %d", roleStr(rf.role), rf.me, rf.log[i], rf.commitIdx, rf.lastApplied))
 			rf.mu.Unlock()
 			rf.applierCh <- applyMsg
 			rf.mu.Lock()
@@ -172,26 +167,20 @@ func (rf *Raft) ticker() {
 		rf.mu.Lock()
 		role := rf.role
 		electionTimePoint := rf.electioTimePoint
-		me := rf.me
-		rf.mu.Unlock()
+		//rf.mu.Unlock()
 		if role == Leader {
 			rf.replicateLogs()
-		} else {
-			if time.Now().After(electionTimePoint) {
-				if role == Follower {
-					fmt.Println(fmt.Sprintf("%s %d heartbeat timeout", roleStr(role), me))
-					rf.mu.Lock()
-					rf.changeToCandidate(rf.currentTerm+1, rf.me)
-					rf.mu.Unlock()
-					rf.startElection()
-				} else if role == Candidate {
-					rf.mu.Lock()
-					rf.changeToCandidate(rf.currentTerm+1, rf.me)
-					rf.mu.Unlock()
-					rf.startElection()
-				}
-			}
+			//rf.mu.Unlock()
+		} else if time.Now().After(electionTimePoint) {
+			//rf.mu.Lock()
+			rf.changeToCandidate(rf.currentTerm+1, rf.me)
+			//rf.mu.Unlock()
+			rf.startElection()
 		}
+		//else {
+		//	rf.mu.Unlock()
+		//}
+		rf.mu.Unlock()
 		time.Sleep(50 * time.Millisecond)
 	}
 }
@@ -220,10 +209,11 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-
 	// start ticker goroutine to start elections
 	go rf.ticker()
 	go rf.applier()
+
+	rf.initLogger()
 
 	return rf
 }

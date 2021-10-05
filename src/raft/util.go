@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"log"
 	"math/rand"
 	"time"
@@ -19,14 +18,14 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 func (rf *Raft) getRoleL() Role {
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	r := rf.role
-	rf.mu.Unlock()
 	return r
 }
 
 func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
 	if rf.role == Leader {
-		fmt.Println(fmt.Sprintf("%s %d change to follower", roleStr(rf.role), rf.me))
+		rf.log_info("change to follower from leader")
 	}
 	rf.role = Follower
 	rf.setNewElectionPoint()
@@ -63,7 +62,11 @@ func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 
 func (rf *Raft) changeToLeader() {
 	rf.role = Leader
+	rf.log_info("become leader")
 	//rf.timeStart = time.Now()
+	for i, _ := range rf.nextIdx {
+		rf.nextIdx[i] = rf.log[len(rf.log)-1].Idx + 1
+	}
 	rf.setNewElectionPoint()
 }
 
@@ -83,13 +86,14 @@ func (rf *Raft) setNewElectionPoint() {
 	rf.electioTimePoint = time.Now().Add(randomElectionTimeOut())
 }
 
-func getLogSliceIdx(log []LogEntry, i int) int {
-	return len(log) - (int(log[len(log)-1].Idx) - i + 1)
-}
-
 func randomElectionTimeOut() time.Duration {
 	//old 150+150
-	return time.Duration(rand.Int31n(150)+150) * time.Millisecond
+	//return time.Duration(rand.Int31n(150)+150) * time.Millisecond
+	return time.Duration(rand.Int31n(500)+300) * time.Millisecond
+}
+
+func getLogSliceIdx(log []LogEntry, i int) int {
+	return len(log) - (int(log[len(log)-1].Idx) - i + 1)
 }
 
 //

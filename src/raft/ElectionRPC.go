@@ -1,21 +1,17 @@
 package raft
 
-import "fmt"
-
 //Todo use election task
 func (rf *Raft) startElection() {
-	ch := make(chan bool)
-	defer close(ch)
-	rf.mu.Lock()
+	//rf.mu.Lock()
 	if rf.role != Candidate {
-		rf.mu.Unlock()
+		//rf.mu.Unlock()
 		return
 	}
 	currTerm := rf.currentTerm
 	me := rf.me
 	lastLog := rf.log[len(rf.log)-1]
-	fmt.Println(fmt.Sprintf("%d start election with term %d ", rf.me, rf.currentTerm))
-	rf.mu.Unlock()
+	rf.log_info("start election")
+	//rf.mu.Unlock()
 	//
 	recVotes := 1
 	finish := false
@@ -33,7 +29,6 @@ func (rf *Raft) startElection() {
 				lastLog.Term,
 			}
 			reply := &RequestVoteReply{}
-			//todo term to higher
 			ok := rf.sendRequestVote(idx, args, reply)
 			if ok {
 				rf.mu.Lock()
@@ -48,8 +43,7 @@ func (rf *Raft) startElection() {
 							return
 						}
 						rf.changeToLeader()
-						go rf.replicateLogs()
-						fmt.Println(fmt.Sprintf("%d becomes leader with term %d", rf.me, rf.currentTerm))
+						rf.replicateLogs()
 					}
 				} else if reply.Term > rf.currentTerm {
 					rf.changeToFollower(reply.Term, -1)

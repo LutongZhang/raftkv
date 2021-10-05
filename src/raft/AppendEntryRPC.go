@@ -1,7 +1,5 @@
 package raft
 
-import "fmt"
-
 //AppendEntry
 type AppendEntryArgs struct {
 	Term         int64
@@ -19,7 +17,6 @@ type AppendEntryReply struct {
 
 //logworker receive command from channel
 func (rf *Raft) replicateLogs() {
-	//fmt.Println("start replicate with commit idx", rf.commitIdx)
 	for idx, _ := range rf.peers {
 		idx := idx
 		if idx == rf.me {
@@ -36,31 +33,29 @@ func (rf *Raft) replicateLog(peerIdx int) {
 		rf.mu.Unlock()
 		return
 	}
-	term := rf.currentTerm
-	me := rf.me
-	commitIdx := rf.commitIdx
-	peerNextIdx := rf.nextIdx[peerIdx]
-	lastIncludedIdx := rf.log[0].Idx
+
 	var entries []LogEntry
 	var prevLog LogEntry
-	if peerNextIdx <= lastIncludedIdx {
-		rf.nextIdx[peerIdx] = lastIncludedIdx + 1
-		peerNextIdx = lastIncludedIdx + 1
+	if rf.nextIdx[peerIdx] <= rf.log[0].Idx {
+		rf.nextIdx[peerIdx] = rf.log[0].Idx + 1
+	} else if rf.nextIdx[peerIdx]-1 > rf.log[len(rf.log)-1].Idx {
+		rf.nextIdx[peerIdx] = rf.log[len(rf.log)-1].Idx
 	}
-	i := getLogSliceIdx(rf.log, int(peerNextIdx))
+	i := getLogSliceIdx(rf.log, int(rf.nextIdx[peerIdx]))
 	//peer catch up, maybe hb condition
 	if i < len(rf.log) {
 		entries = rf.log[i:]
+		//entries = make([]LogEntry,len(rf.log[i:]))
+		//copy(entries,rf.log[i:])
 	}
 	prevLog = rf.log[i-1]
-
 	rf.mu.Unlock()
 	args := &AppendEntryArgs{
-		Term:         term,
-		LeaderId:     me,
+		Term:         rf.currentTerm,
+		LeaderId:     rf.me,
 		PrevLogIndex: prevLog.Idx,
 		PrevLogTerm:  prevLog.Term,
-		LeaderCommit: commitIdx,
+		LeaderCommit: rf.commitIdx,
 		Entries:      entries,
 	}
 	reply := &AppendEntryReply{}
@@ -68,12 +63,17 @@ func (rf *Raft) replicateLog(peerIdx int) {
 	rf.ProcessAppendEntryReply(peerIdx, ok, args, reply)
 }
 
+//AppendEntries
+func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *AppendEntryReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntry", args, reply)
+	return ok
+}
+
 //TOdo 调整时间 ,防止重复复制,Todo 看commit的时候参考现在的log
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
+	//rf.log_infof("append %v in %v",args.Entries,rf.log)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	//fmt.Println(fmt.Sprintf("%s %d receive appendEntry from %d", roleStr(rf.role), rf.me, args.LeaderId))
-	//reset term
 	if args.Term >= rf.currentTerm {
 		if args.Term > rf.currentTerm {
 			rf.changeToFollower(args.Term, -1)
@@ -116,7 +116,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			} else {
 				rf.log = rf.log[:ptr]
 				rf.appendLogs(args.Entries[j:])
-				fmt.Println(fmt.Sprintf("%s %d append %v from %d in log %v with commitIdx %d lastApplied %d", roleStr(rf.role), rf.me, args.Entries[j:], args.LeaderId, rf.log, rf.commitIdx, rf.lastApplied))
+				rf.log_infof("append %v from %d",args.Entries[j:], args.LeaderId)
 				break
 			}
 		}
@@ -129,59 +129,49 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 		rf.log = rf.log[:ptr]
 		reply.Term = rf.currentTerm
 		reply.Success = false
-		//fmt.Println("yyyy", rf.me, args.LeaderId, args.PrevLogIndex)
 		return
 	}
-}
-
-//AppendEntries
-func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *AppendEntryReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntry", args, reply)
-	return ok
 }
 
 func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if rf.role != Leader {
-		return
-	}
-	//fmt.Println(rf.me, "append Entry for", peerIdx)
 	if !ok {
 		go rf.replicateLog(peerIdx)
 		return
 	}
 
-	if reply.Success {
-		newNextIdx := args.PrevLogIndex + int64(len(args.Entries)) + 1
-		newMatchIdx := args.PrevLogIndex + int64(len(args.Entries))
-		if newNextIdx > rf.nextIdx[peerIdx] {
-			rf.nextIdx[peerIdx] = newNextIdx
+	if reply.Term > rf.currentTerm {
+		rf.changeToFollower(reply.Term, -1)
+		return
+	} else if rf.currentTerm == args.Term{
+		if reply.Success {
+			newNextIdx := args.PrevLogIndex + int64(len(args.Entries)) + 1
+			newMatchIdx := args.PrevLogIndex + int64(len(args.Entries))
+			if newNextIdx > rf.nextIdx[peerIdx] {
+				rf.nextIdx[peerIdx] = newNextIdx
+			}
+			if newMatchIdx > rf.matchIdx[peerIdx] {
+				rf.matchIdx[peerIdx] = newMatchIdx
+			}
+			rf.leaderCommitLogs()
+		} else {
+			//for condition: reply term > old term, but not new term
+			//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
+			if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
+				rf.nextIdx[peerIdx] -= 1
+			}
+			go rf.replicateLog(peerIdx)
 		}
-		if newMatchIdx > rf.matchIdx[peerIdx] {
-			rf.matchIdx[peerIdx] = newMatchIdx
-		}
-		rf.leaderCommitLogs()
-		rf.signalApplier()
-	} else {
-		if reply.Term > rf.currentTerm {
-			rf.changeToFollower(rf.currentTerm, rf.votedFor)
-			return
-		}
-		//for condition: reply term > old term, but not new term
-		//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
-		if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
-			rf.nextIdx[peerIdx] -= 1
-			//fmt.Println("xxxxx", rf.me, peerIdx, rf.nextIdx[peerIdx])
-		}
-		//if rf.nextIdx[peerIdx]
-		go rf.replicateLog(peerIdx)
 	}
 }
 
 //
 func (rf *Raft) leaderCommitLogs() {
 	//TODO match里面最小超过n/2的
+	if rf.role != Leader {
+		return
+	}
 	for i := len(rf.log) - 1; i >= 0; i-- {
 		logEntry := rf.log[i]
 		matches := 1
@@ -194,11 +184,12 @@ func (rf *Raft) leaderCommitLogs() {
 			}
 		}
 		if matches > len(rf.peers)/2 {
-			if logEntry.Term != rf.currentTerm || rf.commitIdx >= logEntry.Idx {
-				break
+			if logEntry.Term == rf.currentTerm && logEntry.Idx > rf.commitIdx {
+				rf.commitIdx = logEntry.Idx
+				rf.signalApplier()
+				rf.log_infof("commit %v",rf.log[i])
 			}
-			rf.commitIdx = logEntry.Idx
-			fmt.Println(fmt.Sprintf("%s %d commit %v", roleStr(rf.role), rf.me, rf.log[i]))
+			break
 		}
 	}
 }

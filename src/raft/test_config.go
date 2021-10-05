@@ -548,9 +548,6 @@ func (cfg *config) one(cmd interface{}, expectedServers int, retry bool) int {
 			time.Sleep(50 * time.Millisecond)
 		}
 	}
-	fmt.Println("0 server ", cfg.logs[0])
-	fmt.Println("1 server ", cfg.logs[1])
-	fmt.Println("2 server ", cfg.logs[2])
 	cfg.t.Fatalf("one(%v) failed to reach agreement", cmd)
 	return -1
 }
