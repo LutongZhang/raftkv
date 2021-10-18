@@ -5,8 +5,10 @@ import (
 	"6.824/labrpc"
 	"6.824/raft"
 	"log"
+	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const Debug = false
@@ -18,32 +20,126 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
+func uniKey(sessionId int64,serialNum int)string{
+	return strconv.Itoa(int(sessionId)) + "&" + strconv.Itoa(serialNum)
+}
 
 type Op struct {
-	// Your definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	SessionId  int64
+	SerialNum int
+	OpType string
+	Key string
+	Value string
+}
+
+type subPub struct {
+	mu      sync.RWMutex
+	mem map[string]chan *Op
+}
+
+func (sp *subPub)subscribe(key string)chan *Op{
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.mem[key] = make(chan *Op,1)
+	return sp.mem[key]
+}
+
+func (sp *subPub)publish(key string,res *Op){
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	ch,ok := sp.mem[key]
+	if ok{
+		ch <- res
+	}
+}
+
+func (sp *subPub)cancel(key string){
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	delete(sp.mem,key)
 }
 
 type KVServer struct {
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
-
+	store 		map[string]string
+	sessions   map[int64]int
+	cb       subPub //Todo 用idx作为key
 	maxraftstate int // snapshot if log grows this big
-
 	// Your definitions here.
 }
 
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+	//fmt.Println("start: ",uniKey(args.SessionId,args.SerialNum))
+	Key := uniKey(args.SessionId,args.SerialNum)
+	ch := kv.cb.subscribe(Key)
+	_,_,isLeader := kv.rf.Start(Op{
+		args.SessionId,
+		args.SerialNum,
+		"Get",
+		args.Key,
+		"",
+	})
+	if !isLeader{
+		reply.Err = ErrWrongLeader
+		goto release
+		return
+	}
+	select {
+		case res :=<-ch:
+			reply.Err = OK
+			reply.Value = res.Value
+		case <-time.After(3*time.Second):
+			reply.Err = ErrTimeOut
+	}
+
+release:
+	kv.cb.cancel(Key)
+
 }
 
 func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+	//fmt.Println("start: ",uniKey(args.SessionId,args.SerialNum))
+	kv.mu.Lock()
+	did := false
+	lastSerialNum,ok :=  kv.sessions[args.SessionId]
+	if ok {
+		did = args.SerialNum <= lastSerialNum
+	}
+	kv.mu.Unlock()
+	if did{
+		reply.Err = OK
+		return
+	}
+	key := uniKey(args.SessionId,args.SerialNum)
+	ch := kv.cb.subscribe(key)
+	_,_,isLeader := kv.rf.Start(Op{
+		args.SessionId,
+		args.SerialNum,
+		args.Op,
+		args.Key,
+		args.Value,
+	})
+	if !isLeader{
+		reply.Err = ErrWrongLeader
+		goto release
+		return
+	}
+	//fmt.Println("start: ",uniKey(args.SessionId,args.SerialNum))
+	select {
+		case <-ch:
+			reply.Err = OK
+		case <-time.After(3*time.Second):
+			reply.Err = ErrTimeOut
+	}
+
+release:
+	kv.cb.cancel(key)
+
 }
 
 //
@@ -67,6 +163,44 @@ func (kv *KVServer) killed() bool {
 	return z == 1
 }
 
+func  (kv *KVServer)processOp(op *Op){
+	switch op.OpType {
+		case "Get":
+			c, ok := kv.store[op.Key]
+			if ok {
+				op.Value = c
+			}
+		case "Put":
+				kv.mu.Lock()
+				v,ok := kv.sessions[op.SessionId]
+				if !ok ||(ok && op.SerialNum > v){
+					kv.sessions[op.SessionId] = op.SerialNum
+					kv.store[op.Key] = op.Value
+				}
+				kv.mu.Unlock()
+		case "Append":
+			kv.mu.Lock()
+			v,ok := kv.sessions[op.SessionId]
+			if !ok ||(ok && op.SerialNum > v){
+				kv.sessions[op.SessionId] = op.SerialNum
+				kv.store[op.Key] += op.Value
+			}
+			kv.mu.Unlock()
+	}
+	kv.cb.publish(uniKey(op.SessionId,op.SerialNum),op)
+}
+
+func (kv *KVServer)applier(){
+	for msg := range kv.applyCh{
+		if msg.CommandValid{
+			op := msg.Command.(Op)
+			kv.processOp(&op)
+		}else{
+
+		}
+	}
+}
+
 //
 // servers[] contains the ports of the set of
 // servers that will cooperate via Raft to
@@ -85,16 +219,23 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
-
 	kv := new(KVServer)
 	kv.me = me
+	kv.mu = sync.RWMutex{}
 	kv.maxraftstate = maxraftstate
+	kv.store = make(map[string]string)
+	kv.sessions = make(map[int64]int)
+	kv.cb = subPub{
+		sync.RWMutex{},
+			make(map[string]chan *Op),
+	}
 
 	// You may need initialization code here.
 
 	kv.applyCh = make(chan raft.ApplyMsg)
-	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
+	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+	go kv.applier()
 	// You may need initialization code here.
 
 	return kv
