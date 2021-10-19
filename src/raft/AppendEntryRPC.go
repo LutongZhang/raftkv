@@ -161,7 +161,12 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 			if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
 				rf.nextIdx[peerIdx] -= 1
 			}
-			go rf.replicateLog(peerIdx)
+			if rf.nextIdx[peerIdx] > rf.log[0].Idx{
+				go rf.replicateLog(peerIdx)
+			} else{
+				go rf.installSnapshotToPeers(rf.log[0].Idx,rf.log[0].Term,rf.persister.ReadSnapshot())
+			}
+
 		}
 	}
 }

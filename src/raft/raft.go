@@ -59,6 +59,11 @@ type Raft struct {
 	//Applier
 	applierCh chan ApplyMsg
 	applyCond *sync.Cond
+
+	//snapshot
+	//snapshot []byte
+	//snapshotIdx int64
+	//snapshotTerm int64
 }
 
 //
@@ -171,19 +176,12 @@ func (rf *Raft) ticker() {
 		rf.mu.Lock()
 		role := rf.role
 		electionTimePoint := rf.electioTimePoint
-		//rf.mu.Unlock()
 		if role == Leader {
 			rf.replicateLogs()
-			//rf.mu.Unlock()
 		} else if time.Now().After(electionTimePoint) {
-			//rf.mu.Lock()
 			rf.changeToCandidate(rf.currentTerm+1, rf.me)
-			//rf.mu.Unlock()
 			rf.startElection()
 		}
-		//else {
-		//	rf.mu.Unlock()
-		//}
 		rf.mu.Unlock()
 		time.Sleep(50 * time.Millisecond)
 	}

@@ -46,8 +46,6 @@ func (rf *Raft) installSnapshotToPeer(peer int, lastIncludedIndex int64, lastInc
 		if reply.Term > rf.currentTerm {
 			rf.changeToFollower(reply.Term, -1)
 		}
-	} else {
-		rf.installSnapshotToPeer(peer, lastIncludedIndex, lastIncludedTerm, data)
 	}
 }
 
