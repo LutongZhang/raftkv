@@ -1,10 +1,10 @@
 package raft
 
 import (
+	rotateLogs "github.com/lestrrat-go/file-rotatelogs"
 	log "github.com/sirupsen/logrus"
 	"time"
 
-	rotateLogs "github.com/lestrrat-go/file-rotatelogs"
 	//"time"
 )
 
@@ -14,11 +14,11 @@ func init() {
 
 func (rf *Raft)initLogger(){
 	log.SetFormatter(&log.TextFormatter{
-		ForceColors:               true,
+		//ForceColors:               true,
 		EnvironmentOverrideColors: true,
 		TimestampFormat:           "2006-01-02 15:04:05", //时间格式
 		FullTimestamp:true,
-		// DisableLevelTruncation:true,
+		//DisableLevelTruncation:true,
 	})
 
 	path := "./raft_log/raft.log"

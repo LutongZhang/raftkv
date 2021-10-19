@@ -49,7 +49,6 @@ func (rf *Raft) replicateLog(peerIdx int) {
 		//copy(entries,rf.log[i:])
 	}
 	prevLog = rf.log[i-1]
-	rf.mu.Unlock()
 	args := &AppendEntryArgs{
 		Term:         rf.currentTerm,
 		LeaderId:     rf.me,
@@ -59,6 +58,7 @@ func (rf *Raft) replicateLog(peerIdx int) {
 		Entries:      entries,
 	}
 	reply := &AppendEntryReply{}
+	rf.mu.Unlock()
 	ok := rf.SendAppendEntry(peerIdx, args, reply)
 	rf.ProcessAppendEntryReply(peerIdx, ok, args, reply)
 }
@@ -71,8 +71,8 @@ func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 
 //TOdo 调整时间 ,防止重复复制,Todo 看commit的时候参考现在的log
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
-	//rf.log_infof("append %v in %v",args.Entries,rf.log)
 	rf.mu.Lock()
+	rf.log_infof("xxx %v in %v",args.Entries,rf.log)
 	defer rf.mu.Unlock()
 	if args.Term >= rf.currentTerm {
 		if args.Term > rf.currentTerm {

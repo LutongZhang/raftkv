@@ -4,6 +4,7 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
+	"bytes"
 	"fmt"
 	"log"
 	"strconv"
@@ -171,14 +172,12 @@ func  (kv *KVServer)processOp(op *Op){
 			if ok {
 				op.Value = c
 			}
-			fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 		case "Put":
 				kv.mu.Lock()
 				v,ok := kv.sessions[op.SessionId]
 				if !ok ||(ok && op.SerialNum > v){
 					kv.sessions[op.SessionId] = op.SerialNum
 					kv.store[op.Key] = op.Value
-					fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 				}
 				kv.mu.Unlock()
 		case "Append":
@@ -187,7 +186,6 @@ func  (kv *KVServer)processOp(op *Op){
 			if !ok ||(ok && op.SerialNum > v){
 				kv.sessions[op.SessionId] = op.SerialNum
 				kv.store[op.Key] += op.Value
-				fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 			}
 			kv.mu.Unlock()
 	}
@@ -197,11 +195,35 @@ func  (kv *KVServer)processOp(op *Op){
 func (kv *KVServer)applier(){
 	for msg := range kv.applyCh{
 		if msg.CommandValid{
+			fmt.Println(fmt.Sprintf("%d apply command",kv.me))
 			op := msg.Command.(Op)
 			kv.processOp(&op)
-		}else{
-
+			if kv.rf.GetRaftStateSize() >= kv.maxraftstate{
+				fmt.Println(fmt.Sprintf("%d snapshot start",kv.me))
+				w := new(bytes.Buffer)
+				e := labgob.NewEncoder(w)
+				e.Encode(kv.store)
+				b := w.Bytes()
+				kv.rf.Snapshot(msg.CommandIndex,b)
+			}
+		}else if msg.SnapshotValid{
+			fmt.Println(fmt.Sprintf("%d apply snapshot",kv.me))
+			ok := kv.rf.CondInstallSnapshot(msg.SnapshotTerm,msg.SnapshotIndex,msg.Snapshot)
+			if ok{
+				kv.restoreSnapshot(msg.Snapshot)
+			}
 		}
+	}
+}
+
+func (kv *KVServer)restoreSnapshot(b []byte){
+	if !(b == nil || len(b) < 1) {
+		fmt.Println(fmt.Sprintf("%d snapshot restore",kv.me))
+		var newStore map[string]string
+		r := bytes.NewBuffer(b)
+		d := labgob.NewDecoder(r)
+		d.Decode(&newStore)
+		kv.store = newStore
 	}
 }
 
@@ -233,12 +255,12 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 		sync.RWMutex{},
 			make(map[string]chan *Op),
 	}
-
 	// You may need initialization code here.
-
 	kv.applyCh = make(chan raft.ApplyMsg)
-
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
+
+	kv.restoreSnapshot(kv.rf.ReadSnapshot())
+
 	go kv.applier()
 	// You may need initialization code here.
 

@@ -3,6 +3,8 @@ package raft
 import (
 	"6.824/labgob"
 	"bytes"
+	"os"
+
 	//	"bytes"
 	"sync"
 	"sync/atomic"
@@ -94,6 +96,8 @@ func (rf *Raft) readPersist(data []byte) {
 	var votedFor int
 	var log []LogEntry
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
+		rf.log_info("Decode persisted raft state wrong")
+		os.Exit(-1)
 	} else {
 		//Todo put the first log as last include idx term, directly update nextidx lastApplied?
 		rf.role = Follower

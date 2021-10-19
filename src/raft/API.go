@@ -1,5 +1,6 @@
 package raft
 
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -11,6 +12,13 @@ func (rf *Raft) GetState() (int, bool) {
 	return term, isleader
 }
 
+func (rf *Raft) GetRaftStateSize() int {
+	return rf.persister.RaftStateSize()
+}
+
+func (rf *Raft)ReadSnapshot()[]byte{
+	return rf.persister.ReadSnapshot()
+}
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -71,7 +79,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 // have more recent info since it communicate the snapshot on applyCh.
 //
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
-
 	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -81,8 +88,6 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 		rf.log_infof("CondInstall start with last term %d last idx %d",lastIncludedTerm,lastIncludedIndex )
 		rf.lastApplied = int64(lastIncludedIndex) //Todo ????
 		rf.persistStateAndSnapshot(snapshot)
-		//rf.mu.Lock()
-		//defer rf.mu.Unlock()
 		if lastIncludedIndex <= int(rf.log[len(rf.log)-1].Idx) {
 			i := getLogSliceIdx(rf.log, lastIncludedIndex)
 			rf.log = rf.log[i:] //first one is always previous log
