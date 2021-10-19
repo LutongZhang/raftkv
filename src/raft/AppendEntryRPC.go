@@ -72,7 +72,6 @@ func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *Append
 //TOdo 调整时间 ,防止重复复制,Todo 看commit的时候参考现在的log
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
-	rf.log_infof("xxx %v in %v",args.Entries,rf.log)
 	defer rf.mu.Unlock()
 	if args.Term >= rf.currentTerm {
 		if args.Term > rf.currentTerm {

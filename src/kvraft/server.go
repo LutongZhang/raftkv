@@ -5,7 +5,6 @@ import (
 	"6.824/labrpc"
 	"6.824/raft"
 	"bytes"
-	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -24,6 +23,11 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 
 func uniKey(sessionId int64,serialNum int)string{
 	return strconv.Itoa(int(sessionId)) + "&" + strconv.Itoa(serialNum)
+}
+
+type Snapshot struct {
+	Sessions   map[int64]int
+	Store 		map[string]string
 }
 
 type Op struct {
@@ -68,7 +72,7 @@ type KVServer struct {
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 	store 		map[string]string
-	sessions   map[int64]int
+	sessions   map[int64]int  //需要恢复
 	cb       subPub //Todo 用idx作为key
 	maxraftstate int // snapshot if log grows this big
 	// Your definitions here.
@@ -141,7 +145,6 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 release:
 	kv.cb.cancel(key)
-
 }
 
 //
@@ -195,19 +198,22 @@ func  (kv *KVServer)processOp(op *Op){
 func (kv *KVServer)applier(){
 	for msg := range kv.applyCh{
 		if msg.CommandValid{
-			fmt.Println(fmt.Sprintf("%d apply command",kv.me))
+			//fmt.Println(fmt.Sprintf("%d apply command",kv.me))
 			op := msg.Command.(Op)
 			kv.processOp(&op)
 			if kv.rf.GetRaftStateSize() >= kv.maxraftstate{
-				fmt.Println(fmt.Sprintf("%d snapshot start",kv.me))
+				//fmt.Println(fmt.Sprintf("%d snapshot start",kv.me))
 				w := new(bytes.Buffer)
 				e := labgob.NewEncoder(w)
-				e.Encode(kv.store)
+				e.Encode(Snapshot{
+					kv.sessions,
+					kv.store,
+				})
 				b := w.Bytes()
 				kv.rf.Snapshot(msg.CommandIndex,b)
 			}
 		}else if msg.SnapshotValid{
-			fmt.Println(fmt.Sprintf("%d apply snapshot",kv.me))
+			//fmt.Println(fmt.Sprintf("%d apply snapshot",kv.me))
 			ok := kv.rf.CondInstallSnapshot(msg.SnapshotTerm,msg.SnapshotIndex,msg.Snapshot)
 			if ok{
 				kv.restoreSnapshot(msg.Snapshot)
@@ -218,12 +224,13 @@ func (kv *KVServer)applier(){
 
 func (kv *KVServer)restoreSnapshot(b []byte){
 	if !(b == nil || len(b) < 1) {
-		fmt.Println(fmt.Sprintf("%d snapshot restore",kv.me))
-		var newStore map[string]string
+		//fmt.Println(fmt.Sprintf("%d snapshot restore",kv.me))
+		data := &Snapshot{}
 		r := bytes.NewBuffer(b)
 		d := labgob.NewDecoder(r)
-		d.Decode(&newStore)
-		kv.store = newStore
+		d.Decode(&data)
+		kv.store = data.Store
+		kv.sessions = data.Sessions
 	}
 }
 

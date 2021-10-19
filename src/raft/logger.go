@@ -1,7 +1,10 @@
 package raft
 
 import (
+	rotateLogs "github.com/lestrrat-go/file-rotatelogs"
 	log "github.com/sirupsen/logrus"
+	"time"
+
 	//"time"
 )
 
@@ -18,17 +21,17 @@ func (rf *Raft)initLogger(){
 		//DisableLevelTruncation:true,
 	})
 
-	//path := "./raft_log/raft.log"
-	//logfile,_ :=rotateLogs.New(
-	//	path+".%Y%m%d%H%M",
-	//	rotateLogs.WithLinkName(path),
-	//	rotateLogs.WithMaxAge(time.Duration(12)*time.Hour),
-	//	rotateLogs.WithRotationTime(time.Duration(6)*time.Hour),
-	//	)
-	//log.SetOutput(logfile)
-	//
-	////show code line
-	//log.SetReportCaller(true)
+	path := "./raft_log/raft.log"
+	logfile,_ :=rotateLogs.New(
+		path+".%Y%m%d%H%M",
+		rotateLogs.WithLinkName(path),
+		rotateLogs.WithMaxAge(time.Duration(12)*time.Hour),
+		rotateLogs.WithRotationTime(time.Duration(6)*time.Hour),
+		)
+	log.SetOutput(logfile)
+
+	//show code line
+	log.SetReportCaller(true)
 
 	log.SetLevel(log.InfoLevel)
 }
