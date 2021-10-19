@@ -2,13 +2,20 @@ package kvraft
 
 import (
 	"6.824/labrpc"
+	"fmt"
 	rand2 "math/rand"
 	"reflect"
 	"sync"
 )
 import "crypto/rand"
 import "math/big"
+//Todo 用read+set做幂等，提高吞吐
 
+type MSG struct {
+	args interface{}
+	reply interface{}
+	cb chan bool
+}
 
 type Clerk struct {
 	mu sync.RWMutex
@@ -16,6 +23,7 @@ type Clerk struct {
 	leader int
 	sessionId int64
 	serialNum int
+	msgChan chan MSG
 	// You will have to modify this struct.
 }
 
@@ -32,9 +40,12 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.leader = 0
 	ck.sessionId = rand2.Int63()
 	ck.serialNum = 0
+	ck.msgChan = make(chan MSG)
+	go ck.RPCWorker()
 	// You'll have to add code here.
 	return ck
 }
+
 
 //
 // fetch the current value for a key.
@@ -49,21 +60,15 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-	// You will have to modify this function.
 	ck.serialNum+=1
-	for true{
-		args := GetArgs{
-			ck.sessionId,
-			ck.serialNum,
-			key,
-		}
-		reply := GetReply{}
-		ck.sendRPCtoL("KVServer.Get",&args,&reply)
-		if reply.Err == OK{
-			return reply.Value
-		}
+	args :=&GetArgs{
+		Key: key,
 	}
-	return ""
+	reply := &GetReply{}
+	cb := make(chan bool)
+	ck.msgChan <-MSG{args,reply,cb}
+	<-cb
+	return reply.Value
 }
 
 //
@@ -77,22 +82,17 @@ func (ck *Clerk) Get(key string) string {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	// You will have to modify this function.
-	ck.serialNum+=1
-	for true {
-		args := PutAppendArgs{
-			ck.sessionId,
-			ck.serialNum,
-			key,
-			value,
-			op,
-		}
-		reply := PutAppendReply{}
-		ck.sendRPCtoL("KVServer.PutAppend",&args,&reply)
-		if reply.Err == OK{
-			return
-		}
+	msg := MSG{
+		&PutAppendArgs{
+			Key: key,
+			Value: value,
+			Op: op,
+		},
+		&PutAppendReply{},
+		make(chan bool),
 	}
+	ck.msgChan <-msg
+	<-msg.cb
 }
 
 func (ck *Clerk) Put(key string, value string) {
@@ -103,13 +103,46 @@ func (ck *Clerk) Append(key string, value string) {
 	ck.PutAppend(key, value, "Append")
 }
 
-func (ck *Clerk)sendRPCtoL(command string,args interface{},reply interface{}){
+func (ck *Clerk)RPCWorker(){
+	for msg := range ck.msgChan{
+		ck.serialNum+=1
+		args := msg.args
+		reply := msg.reply
+		switch args.(type) {
+		case *GetArgs:
+			args.(*GetArgs).SessionId = ck.sessionId
+			args.(*GetArgs).SerialNum = ck.serialNum
+			ck.sendRPC("KVServer.Get",args,reply)
+			msg.cb <-true
+		case *PutAppendArgs:
+			args.(*PutAppendArgs).SessionId = ck.sessionId
+			args.(*PutAppendArgs).SerialNum = ck.serialNum
+			ck.sendRPC("KVServer.PutAppend",args,reply)
+			msg.cb<-true
+		default:
+			fmt.Println("unknown")
+			msg.cb<-false
+		}
+	}
+}
 
+func (ck *Clerk)sendRPC(command string,args interface{},reply interface{}){
+	for true {
+		err :=ck.sendRPCtoL(command,args,reply)
+		if err == OK{
+			return
+		}
+	}
+}
+
+func (ck *Clerk)sendRPCtoL(command string,args interface{},reply interface{})Err{
 	l := ck.leader
+	var err Err
 	for true{
 		ok := ck.servers[l].Call(command,args,reply)
 		if ok{
-			if getErr(reply)!= ErrWrongLeader{
+			err = getErr(reply)
+			if err!= ErrWrongLeader{
 				if ck.leader != l{
 					ck.leader = l
 				}
@@ -118,6 +151,7 @@ func (ck *Clerk)sendRPCtoL(command string,args interface{},reply interface{}){
 		}
 		l = (l+1)%len(ck.servers)
 	}
+	return err
 }
 
 func getErr(v interface{})Err{

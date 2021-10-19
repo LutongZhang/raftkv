@@ -4,6 +4,7 @@ import (
 	"6.824/labgob"
 	"6.824/labrpc"
 	"6.824/raft"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -170,12 +171,14 @@ func  (kv *KVServer)processOp(op *Op){
 			if ok {
 				op.Value = c
 			}
+			fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 		case "Put":
 				kv.mu.Lock()
 				v,ok := kv.sessions[op.SessionId]
 				if !ok ||(ok && op.SerialNum > v){
 					kv.sessions[op.SessionId] = op.SerialNum
 					kv.store[op.Key] = op.Value
+					fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 				}
 				kv.mu.Unlock()
 		case "Append":
@@ -184,6 +187,7 @@ func  (kv *KVServer)processOp(op *Op){
 			if !ok ||(ok && op.SerialNum > v){
 				kv.sessions[op.SessionId] = op.SerialNum
 				kv.store[op.Key] += op.Value
+				fmt.Println(fmt.Sprintf("applier apply %d",op.SerialNum))
 			}
 			kv.mu.Unlock()
 	}
