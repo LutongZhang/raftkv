@@ -138,6 +138,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	//fmt.Println("start: ",uniKey(args.SessionId,args.SerialNum))
 	select {
 		case <-ch:
+			//fmt.Println(fmt.Sprintf("%d op: %v",kv.me,args))
 			reply.Err = OK
 		case <-time.After(3*time.Second):
 			reply.Err = ErrTimeOut
@@ -200,17 +201,11 @@ func (kv *KVServer)applier(){
 		if msg.CommandValid{
 			//fmt.Println(fmt.Sprintf("%d apply command",kv.me))
 			op := msg.Command.(Op)
+			//fmt.Println(fmt.Sprintf("%d op: %v",kv.me,op))
 			kv.processOp(&op)
-			if kv.rf.GetRaftStateSize() >= kv.maxraftstate{
+			if kv.rf.GetRaftStateSize() >= kv.maxraftstate && kv.maxraftstate != -1{
 				//fmt.Println(fmt.Sprintf("%d snapshot start",kv.me))
-				w := new(bytes.Buffer)
-				e := labgob.NewEncoder(w)
-				e.Encode(Snapshot{
-					kv.sessions,
-					kv.store,
-				})
-				b := w.Bytes()
-				kv.rf.Snapshot(msg.CommandIndex,b)
+				kv.Snapshot(msg.CommandIndex)
 			}
 		}else if msg.SnapshotValid{
 			//fmt.Println(fmt.Sprintf("%d apply snapshot",kv.me))
@@ -222,9 +217,24 @@ func (kv *KVServer)applier(){
 	}
 }
 
+func (kv *KVServer)Snapshot(commandIdx int){
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	kv.mu.Lock()
+	e.Encode(Snapshot{
+		kv.sessions,
+		kv.store,
+	})
+	kv.mu.Unlock()
+	b := w.Bytes()
+	kv.rf.Snapshot(commandIdx,b)
+}
+
 func (kv *KVServer)restoreSnapshot(b []byte){
 	if !(b == nil || len(b) < 1) {
 		//fmt.Println(fmt.Sprintf("%d snapshot restore",kv.me))
+		kv.mu.Lock()
+		defer kv.mu.Unlock()
 		data := &Snapshot{}
 		r := bytes.NewBuffer(b)
 		d := labgob.NewDecoder(r)

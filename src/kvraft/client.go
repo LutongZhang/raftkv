@@ -60,7 +60,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 func (ck *Clerk) Get(key string) string {
-	ck.serialNum+=1
+	//ck.serialNum+=1
 	args :=&GetArgs{
 		Key: key,
 	}
