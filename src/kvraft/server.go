@@ -24,7 +24,6 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 func uniKey(sessionId int64,serialNum int)string{
 	return strconv.Itoa(int(sessionId)) + "&" + strconv.Itoa(serialNum)
 }
-
 type Snapshot struct {
 	Sessions   map[int64]int
 	Store 		map[string]string

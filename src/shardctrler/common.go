@@ -1,5 +1,11 @@
 package shardctrler
 
+import (
+	"math"
+	"sort"
+	"sync"
+)
+
 //
 // Shard controler: assigns shards to replication groups.
 //
@@ -17,6 +23,9 @@ package shardctrler
 // You will need to add fields to the RPC argument structs.
 //
 
+//MaxRaftState
+const MaxRaftState = 1000
+
 // The number of shards.
 const NShards = 10
 
@@ -28,8 +37,71 @@ type Config struct {
 	Groups map[int][]string // gid -> servers[]
 }
 
+func (cfg *Config)copy()*Config{
+	shards := [10]int{}
+	groups := make(map[int][]string)
+	for i:=0;i<len(cfg.Shards);i++{
+		shards[i] = cfg.Shards[i]
+	}
+	for k,v := range cfg.Groups{
+		var s []string
+		copy(v,s)
+		groups[k] = v
+	}
+	newConfig := &Config{
+		cfg.Num,
+		shards,
+		groups,
+	}
+	return newConfig
+}
+
+func (cfg *Config)AddNum()*Config{
+	cfg.Num+=1
+	return cfg
+}
+
+func (cfg *Config)AddGroup(Servers map[int][]string)*Config{
+	for k,v := range Servers{
+		cfg.Groups[k] = v
+	}
+	return cfg
+}
+
+func (cfg *Config)RmGroup(GIDs []int)*Config{
+	for _,gid := range GIDs {
+		delete(cfg.Groups,gid)
+	}
+	return cfg
+}
+
+func (cfg *Config)MoveShard(shard int, gid int)*Config{
+	cfg.Shards[shard] = gid
+	return cfg
+}
+
+func (cfg *Config)Rebalance()*Config{
+	gids := make([]int, len(cfg.Groups))
+	i := 0
+	for k := range cfg.Groups {
+		gids[i] = k
+		i++
+	}
+	sort.Ints(gids)
+	divValue := int(math.Floor((float64(NShards)/float64(len(gids)) + 0.5)))
+	for i,v := range gids{
+		for j:=0;j < divValue;j++{
+			cfg.Shards[divValue*i+j] = v
+		}
+	}
+	return cfg
+}
+
+//Err type
 const (
 	OK = "OK"
+	ErrTimeOut = "Err Time Out"
+	WrongLeader = "Wrong Leader"
 )
 
 type Err string
@@ -70,4 +142,32 @@ type QueryReply struct {
 	WrongLeader bool
 	Err         Err
 	Config      Config
+}
+
+
+type subPub struct {
+	mu      sync.RWMutex
+	mem map[uint32]chan interface{}
+}
+
+func (sp *subPub)subscribe(key uint32)chan interface{}{
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	sp.mem[key] = make(chan interface{},1)
+	return sp.mem[key]
+}
+
+func (sp *subPub)publish(key uint32,res interface{}){
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	ch,ok := sp.mem[key]
+	if ok{
+		ch <- res
+	}
+}
+
+func (sp *subPub)cancel(key uint32){
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	delete(sp.mem,key)
 }

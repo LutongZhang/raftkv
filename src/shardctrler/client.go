@@ -3,6 +3,7 @@ package shardctrler
 //
 // Shardctrler clerk.
 //
+//TOdo: remember Leader
 
 import "6.824/labrpc"
 import "time"
@@ -29,7 +30,9 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 }
 
 func (ck *Clerk) Query(num int) Config {
-	args := &QueryArgs{}
+	args := &QueryArgs{
+		num,
+	}
 	// Your code here.
 	args.Num = num
 	for {
@@ -46,7 +49,9 @@ func (ck *Clerk) Query(num int) Config {
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
-	args := &JoinArgs{}
+	args := &JoinArgs{
+		servers,
+	}
 	// Your code here.
 	args.Servers = servers
 
@@ -64,7 +69,9 @@ func (ck *Clerk) Join(servers map[int][]string) {
 }
 
 func (ck *Clerk) Leave(gids []int) {
-	args := &LeaveArgs{}
+	args := &LeaveArgs{
+		gids,
+	}
 	// Your code here.
 	args.GIDs = gids
 
@@ -82,7 +89,10 @@ func (ck *Clerk) Leave(gids []int) {
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
-	args := &MoveArgs{}
+	args := &MoveArgs{
+		shard,
+		gid,
+	}
 	// Your code here.
 	args.Shard = shard
 	args.GID = gid
