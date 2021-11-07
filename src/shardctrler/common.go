@@ -91,6 +91,9 @@ func (cfg *Config)Rebalance()*Config{
 	divValue := int(math.Floor((float64(NShards)/float64(len(gids)) + 0.5)))
 	for i,v := range gids{
 		for j:=0;j < divValue;j++{
+			if divValue*i+j >= len(cfg.Shards){
+				break
+			}
 			cfg.Shards[divValue*i+j] = v
 		}
 	}
