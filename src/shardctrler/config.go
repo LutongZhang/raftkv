@@ -286,7 +286,13 @@ func (cfg *config) StartServer(i int) {
 
 	cfg.mu.Unlock()
 
-	cfg.servers[i] = StartServer(ends, i, cfg.saved[i])
+	cfg.servers[i] = StartServer(ends, i, cfg.saved[i],func(servername string) *labrpc.ClientEnd {
+		name := randstring(20)
+		end := cfg.net.MakeEnd(name)
+		cfg.net.Connect(name, servername)
+		cfg.net.Enable(name, true)
+		return end
+	})
 
 	kvsvc := labrpc.MakeService(cfg.servers[i])
 	rfsvc := labrpc.MakeService(cfg.servers[i].rf)

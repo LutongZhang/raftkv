@@ -104,12 +104,13 @@ func (cfg *Config)Rebalance()*Config{
 const (
 	OK = "OK"
 	ErrTimeOut = "Err Time Out"
-	WrongLeader = "Wrong Leader"
+	ErrWrongLeader = "ErrWrongLeader"
 )
 
 type Err string
 
 type JoinArgs struct {
+	UUID uint32
 	Servers map[int][]string // new GID -> servers mappings
 }
 
@@ -119,6 +120,7 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
+	UUID uint32
 	GIDs []int
 }
 
@@ -128,6 +130,7 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
+	UUID uint32
 	Shard int
 	GID   int
 }
@@ -138,6 +141,7 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
+	UUID uint32
 	Num int // desired config number
 }
 
@@ -147,6 +151,36 @@ type QueryReply struct {
 	Config      Config
 }
 
+//
+type PrepareShardMoveArgs struct {
+	UUID uint32
+	To int
+	ToGroup []string
+	From int
+	FromGroup []string
+	Shards []int
+}
+
+type PrepareShardMoveReply struct {
+	Err Err
+}
+
+type CommitShardArgs struct {
+	UUID  uint32
+}
+
+type CommitShardReply struct {
+	Err Err
+}
+//
+
+type ShardsMoveTask struct {
+	to int
+	toGroup []string
+	from int
+	fromGroup []string
+	shards []int
+}
 
 type subPub struct {
 	mu      sync.RWMutex

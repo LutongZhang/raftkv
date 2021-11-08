@@ -3,9 +3,12 @@ package shardctrler
 //
 // Shardctrler clerk.
 //
-//TOdo: remember Leader
+//Todo remove replicate
 
-import "6.824/labrpc"
+import (
+	"6.824/labrpc"
+	"github.com/google/uuid"
+)
 import "time"
 import "crypto/rand"
 import "math/big"
@@ -31,6 +34,7 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 
 func (ck *Clerk) Query(num int) Config {
 	args := &QueryArgs{
+		uuid.New().ID(),
 		num,
 	}
 	// Your code here.
@@ -40,7 +44,7 @@ func (ck *Clerk) Query(num int) Config {
 		for _, srv := range ck.servers {
 			var reply QueryReply
 			ok := srv.Call("ShardCtrler.Query", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.Err == OK {
 				return reply.Config
 			}
 		}
@@ -50,6 +54,7 @@ func (ck *Clerk) Query(num int) Config {
 
 func (ck *Clerk) Join(servers map[int][]string) {
 	args := &JoinArgs{
+		uuid.New().ID(),
 		servers,
 	}
 	// Your code here.
@@ -60,7 +65,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		for _, srv := range ck.servers {
 			var reply JoinReply
 			ok := srv.Call("ShardCtrler.Join", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.Err == OK {
 				return
 			}
 		}
@@ -70,6 +75,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 
 func (ck *Clerk) Leave(gids []int) {
 	args := &LeaveArgs{
+		uuid.New().ID(),
 		gids,
 	}
 	// Your code here.
@@ -80,7 +86,7 @@ func (ck *Clerk) Leave(gids []int) {
 		for _, srv := range ck.servers {
 			var reply LeaveReply
 			ok := srv.Call("ShardCtrler.Leave", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.Err == OK {
 				return
 			}
 		}
@@ -90,6 +96,7 @@ func (ck *Clerk) Leave(gids []int) {
 
 func (ck *Clerk) Move(shard int, gid int) {
 	args := &MoveArgs{
+		uuid.New().ID(),
 		shard,
 		gid,
 	}
@@ -102,7 +109,7 @@ func (ck *Clerk) Move(shard int, gid int) {
 		for _, srv := range ck.servers {
 			var reply MoveReply
 			ok := srv.Call("ShardCtrler.Move", args, &reply)
-			if ok && reply.WrongLeader == false {
+			if ok && reply.Err == OK {
 				return
 			}
 		}

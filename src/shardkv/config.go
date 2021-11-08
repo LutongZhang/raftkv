@@ -279,7 +279,13 @@ func (cfg *config) StartCtrlerserver(i int) {
 
 	p := raft.MakePersister()
 
-	cfg.ctrlerservers[i] = shardctrler.StartServer(ends, i, p)
+	cfg.ctrlerservers[i] = shardctrler.StartServer(ends, i, p,func(servername string) *labrpc.ClientEnd {
+		name := randstring(20)
+		end := cfg.net.MakeEnd(name)
+		cfg.net.Connect(name, servername)
+		cfg.net.Enable(name, true)
+		return end
+	})
 
 	msvc := labrpc.MakeService(cfg.ctrlerservers[i])
 	rfsvc := labrpc.MakeService(cfg.ctrlerservers[i].Raft())

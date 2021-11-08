@@ -4,6 +4,7 @@ import (
 	"6.824/raft"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"github.com/google/uuid"
 	"time"
 )
@@ -16,16 +17,24 @@ const (
 	Join = 1
 	Leave = 2
 	Move = 3
+
+	//internlOp
+	CurConfigUpdate = 4
 )
+
+//Todo 2 phase commit to update shards, apply to rg if rg config num < taget num
 
 type ShardCtrler struct {
 	mu      sync.RWMutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
-	cb       subPub //Todo 用idx作为key
+	cb       *subPub
+	currConfig int
 	// Your data here.
 	configs []Config // indexed by config num
+
+	make_end func(string) *labrpc.ClientEnd
 }
 
 type Op struct {
@@ -37,10 +46,10 @@ type Op struct {
 
 
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
-	output,err := sc.ProcessFunc(Join,args)
+	output,err := sc.ProcessFunc(Join,args.UUID,args)
 	if err != OK{
 		reply.Err = err
-		if err == WrongLeader{
+		if err == ErrWrongLeader{
 			reply.WrongLeader = true
 		}
 	} else{
@@ -51,10 +60,10 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 }
 
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
-	output,err := sc.ProcessFunc(Leave,args)
+	output,err := sc.ProcessFunc(Leave,args.UUID,args)
 	if err != OK{
 		reply.Err = err
-		if err == WrongLeader{
+		if err == ErrWrongLeader{
 			reply.WrongLeader = true
 		}
 	} else{
@@ -64,10 +73,10 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 }
 
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
-	output,err := sc.ProcessFunc(Move,args)
+	output,err := sc.ProcessFunc(Move,args.UUID,args)
 	if err != OK{
 		reply.Err = err
-		if err == WrongLeader{
+		if err == ErrWrongLeader{
 			reply.WrongLeader = true
 		}
 	} else{
@@ -78,10 +87,10 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 
 func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
-	output,err := sc.ProcessFunc(Query,args)
+	output,err := sc.ProcessFunc(Query,args.UUID,args)
 	if err != OK{
 		reply.Err = err
-		if err == WrongLeader{
+		if err == ErrWrongLeader{
 			reply.WrongLeader = true
 		}
 	} else{
@@ -90,18 +99,18 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 }
 
-func (sc *ShardCtrler)ProcessFunc(Type int,args interface{})(output interface{},err Err){
+func (sc *ShardCtrler)ProcessFunc(Type int,uuid uint32,args interface{})(output interface{},err Err){
 	argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
-		uuid.New().ID(),
+		uuid,
 		argsB,
 	}
 	ch :=sc.cb.subscribe(op.CbIdx)
 	defer sc.cb.cancel(op.CbIdx)
 	_,_,isLeader := sc.rf.Start(op)
 	if !isLeader{
-		return nil,WrongLeader
+		return nil,ErrWrongLeader
 	}
 	select {
 	case res :=<-ch:
@@ -128,19 +137,78 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 	return sc.rf
 }
 
+func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,oldConfig int,newConfig int){
+	//phase 1 notify servers to get new shard
+	fmt.Println(fmt.Sprintf("config %d -> %d Plan: %v",oldConfig,newConfig,plan))
+	var wg sync.WaitGroup
+	for _,task := range plan{
+		wg.Add(1)
+		task := task
+		go func() {
+			defer wg.Done()
+			sc.sendPrepareShardsMove(sc.getClients(task.toGroup),task)
+		}()
+	}
+	wg.Wait()
+	fmt.Println("phase 1 complete")
+	//
+	fromServers := make(map[int][]string)
+	for _,task := range plan{
+		if task.from == 0{
+			continue
+		}
+		fromServers[task.from] = task.fromGroup
+	}
+	//phase2 notify servers to delete stale shard
+	for _,group := range fromServers{
+		wg.Add(1)
+		group := group
+		go func() {
+			defer wg.Done()
+			sc.sendCommitShardsMove(sc.getClients(group))
+		}()
+	}
+	wg.Wait()
+	fmt.Println("phase 2 complete")
+	sc.ProcessFunc(CurConfigUpdate,uuid.New().ID(),[]int{oldConfig,newConfig})
+}
+
+
+func (sc *ShardCtrler)shardsUpdate(){
+	for {
+		_,isLeader:=sc.rf.GetState()
+		if isLeader{
+			sc.mu.Lock()
+			currConfig := sc.currConfig
+			latestConfig := len(sc.configs)-1
+			if 	currConfig != latestConfig{
+				plan := getMovePlan(&sc.configs[currConfig],&sc.configs[currConfig+1])
+				sc.mu.Unlock()
+				sc.twoPhaseCommitShardMove(plan,currConfig,currConfig+1)
+			}else{
+				sc.mu.Unlock()
+			}
+		}
+		time.Sleep(time.Millisecond*50)
+	}
+}
+
+//
+// servers[] contains the ports of the set of
+// servers that will cooperate via Raft to
+// form the fault-tolerant shardctrler service.
+// me is the index of the current server in servers[].
+//
 
 func (sc *ShardCtrler)applier(){
 	for msg := range sc.applyCh{
 		if msg.CommandValid{
 			op := msg.Command.(Op)
-			//fmt.Println(fmt.Sprintf("%d op: %v",sc.me,op))
 			sc.processOp(&op)
 			if sc.rf.GetRaftStateSize() >= MaxRaftState && MaxRaftState != -1{
-				//fmt.Println(fmt.Sprintf("%d snapshot start",kv.me))
 				sc.Snapshot(msg.CommandIndex)
 			}
 		}else if msg.SnapshotValid{
-			//fmt.Println(fmt.Sprintf("%d apply snapshot",kv.me))
 			ok := sc.rf.CondInstallSnapshot(msg.SnapshotTerm,msg.SnapshotIndex,msg.Snapshot)
 			if ok{
 				sc.restoreSnapshot(msg.Snapshot)
@@ -150,6 +218,7 @@ func (sc *ShardCtrler)applier(){
 }
 
 func  (sc *ShardCtrler)processOp(op *Op){
+	//fmt.Println(op.Type)
 	var reply interface{}
 	switch op.Type {
 	case Query:
@@ -197,6 +266,15 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			OK,
 		}
 		sc.mu.Unlock()
+	case CurConfigUpdate:
+		sc.mu.Lock()
+		args := []int{}
+		json.Unmarshal(op.Args, &args)
+		if sc.currConfig == args[0]{
+			sc.currConfig = args[1]
+		}
+		fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
+		sc.mu.Unlock()
 	}
 	sc.cb.publish(op.CbIdx,reply)
 }
@@ -229,13 +307,8 @@ func (sc *ShardCtrler)restoreSnapshot(b []byte){
 		sc.configs = data.Configs
 	}
 }
-//
-// servers[] contains the ports of the set of
-// servers that will cooperate via Raft to
-// form the fault-tolerant shardctrler service.
-// me is the index of the current server in servers[].
-//
-func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister) *ShardCtrler {
+//Todo 加入一个make_end Func
+func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,make_end func(string) *labrpc.ClientEnd) *ShardCtrler {
 	sc := new(ShardCtrler)
 	sc.me = me
 	sc.mu = sync.RWMutex{}
@@ -246,17 +319,20 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 		[10]int{},
 		map[int][]string{},
 	}
+	sc.currConfig = 0
+	sc.make_end = make_end
 
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
-	sc.cb =  subPub{
+	sc.cb =  &subPub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),
 	}
 	// Your code here.
 	sc.restoreSnapshot(sc.rf.ReadSnapshot())
 	go sc.applier()
+	go sc.shardsUpdate()
 
 	return sc
 }
