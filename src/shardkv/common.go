@@ -66,6 +66,7 @@ type RetrieveShardsArgs struct {
 type RetrieveShardsReply struct {
 	Err Err
 	Data map[int]map[string]string
+	CacheData map[uint32]bool
 }
 
 type subPub struct {

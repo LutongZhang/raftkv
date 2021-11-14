@@ -1,8 +1,8 @@
 package shardkv
 
 import (
-"sync"
-"time"
+	"sync"
+	"time"
 )
 
 type Cache struct {
@@ -32,5 +32,13 @@ func (c *Cache)get(key uint32)bool{
 		return v
 	}else{
 		return false
+	}
+}
+
+func (c *Cache)combineCache(cache map[uint32]bool){
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k,v := range cache{
+		c.Data[k] = v
 	}
 }

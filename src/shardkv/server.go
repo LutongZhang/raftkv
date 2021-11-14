@@ -177,7 +177,6 @@ func  (kv *ShardKV)processOp(op *Op){
 	var reply interface{}
 	switch op.Type {
 	case Get:
-		//kv.mu.Lock()
 		args := GetArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &GetReply{}
@@ -193,17 +192,13 @@ func  (kv *ShardKV)processOp(op *Op){
 			r.Err = ErrWrongGroup
 		}
 		reply = r
-		//fmt.Println("kv op:",args,reply,getShardsInfo(kv.shards))
-		//kv.mu.Unlock()
 	case Put:
-		//kv.mu.Lock()
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &PutAppendReply{}
 		if kv.cache.get(args.UUID){
 			r.Err = OK
 			reply = r
-			//kv.mu.Unlock()
 			goto cb
 		}
 		if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
@@ -218,18 +213,13 @@ func  (kv *ShardKV)processOp(op *Op){
 		if r.Err == OK{
 			kv.cache.set(args.UUID)
 		}
-		//fmt.Println("kv op:",args,reply,getShardsInfo(kv.shards))
-		//kv.mu.Unlock()
 	case Append:
-		//kv.mu.Lock()
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
-		fmt.Println(kv.gid,kv.me,args.UUID,args.Key,args.Value)
 		r := &PutAppendReply{}
 		if kv.cache.get(args.UUID){
 			r.Err = OK
 			reply = r
-			//kv.mu.Unlock()
 			goto cb
 		}
 		if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
@@ -237,6 +227,7 @@ func  (kv *ShardKV)processOp(op *Op){
 			if v,ok := data[args.Key];ok{
 				r.Err = OK
 				data[args.Key] = v+args.Value
+				fmt.Println(kv.gid,kv.me,args.UUID,args.Key,args.Value)
 			}else{
 				r.Err = ErrNoKey
 			}
@@ -247,13 +238,10 @@ func  (kv *ShardKV)processOp(op *Op){
 		if r.Err == OK{
 			kv.cache.set(args.UUID)
 		}
-		//fmt.Println("kv op:",args,reply,getShardsInfo(kv.shards))
-		//kv.mu.Unlock()
 	case ShardsAdd:
-		//kv.mu.Lock()
-		args := map[int]map[string]string{}
+		args := RetrieveShardsReply{}
 		json.Unmarshal(op.Args, &args)
-		for shardid,data := range args{
+		for shardid,data := range args.Data{
 			if v,ok :=kv.shards[shardid];!ok || v.State == Stale{
 				kv.shards[shardid] = &Shard{
 					Working,
@@ -262,15 +250,12 @@ func  (kv *ShardKV)processOp(op *Op){
 				}
 			}
 		}
+		kv.cache.combineCache(args.CacheData)
 		reply = &shardctrler.PrepareShardMoveReply{OK}
-		//fmt.Println(fmt.Sprintf("shardsAdd- gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
-		//kv.mu.Unlock()
 	case RetrieveShards:
-		//kv.mu.Lock()
 		args := RetrieveShardsArgs{}
 		json.Unmarshal(op.Args, &args)
 		data := make(map[int]map[string]string)
-		//fmt.Println("xxxx",getShardsInfo(kv.shards),args.ShardsId)
 		for _,shardId := range args.ShardsId{
 			kv.shards[shardId].State = Stale
 			data[shardId] = kv.shards[shardId].Data
@@ -278,9 +263,9 @@ func  (kv *ShardKV)processOp(op *Op){
 		reply = &RetrieveShardsReply{
 			OK,
 			data,
+			kv.cache.Data,
 		}
 		fmt.Println(fmt.Sprintf("Retrieve shards - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
-		//kv.mu.Unlock()
 	default:
 		fmt.Println("unknown type for kv:",op.Type)
 		goto cb

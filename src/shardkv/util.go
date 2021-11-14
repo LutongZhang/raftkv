@@ -17,13 +17,17 @@ func (kv *ShardKV)getClients(names []string)[]*labrpc.ClientEnd{
 	return res
 }
 
-func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)map[int]map[string]string{
+func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)*RetrieveShardsReply{
 	if from == 0{
 		data := make(map[int]map[string]string)
 		for _,v:= range shardsId{
 			data[v]=make(map[string]string)
 		}
-		return data
+		return &RetrieveShardsReply{
+			OK,
+			data,
+			map[uint32]bool{},
+		}
 	}
 
 	args := RetrieveShardsArgs{
@@ -37,7 +41,7 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)
 			var reply RetrieveShardsReply
 			ok := srv.Call("ShardKV.RetrieveShards", &args, &reply)
 			if ok && reply.Err == OK{
-				return reply.Data
+				return &reply
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
