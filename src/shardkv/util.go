@@ -2,7 +2,9 @@ package shardkv
 
 import (
 	"6.824/labrpc"
+	"fmt"
 	"github.com/google/uuid"
+	"reflect"
 	"time"
 )
 
@@ -15,10 +17,10 @@ func (kv *ShardKV)getClients(names []string)[]*labrpc.ClientEnd{
 	return res
 }
 
-func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shards[]int)map[int]map[string]string{
+func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)map[int]map[string]string{
 	if from == 0{
 		data := make(map[int]map[string]string)
-		for _,v:= range shards{
+		for _,v:= range shardsId{
 			data[v]=make(map[string]string)
 		}
 		return data
@@ -26,7 +28,7 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shards[]int)map
 
 	args := RetrieveShardsArgs{
 		uuid.New().ID(),
-		shards,
+		shardsId,
 	}
 	servers := kv.getClients(fromGroup)
 	for {
@@ -40,4 +42,20 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shards[]int)map
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+
+
+func getShardsInfo(shards  map[int]*Shard)[]string{
+	info := []string{}
+	for k,v:= range shards{
+		info = append(info,fmt.Sprintf("%d: %s",k,v.State))
+	}
+	return info
+}
+
+
+func getErr(v interface{})Err{
+	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()
+	return Err(x)
 }

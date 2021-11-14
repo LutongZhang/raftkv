@@ -1,6 +1,10 @@
 package shardkv
 
-import "6.824/porcupine"
+import (
+	"6.824/labgob"
+	"6.824/porcupine"
+	"bytes"
+)
 import "6.824/models"
 import "testing"
 import "strconv"
@@ -11,6 +15,30 @@ import "sync"
 import "math/rand"
 import "io/ioutil"
 
+func TestSnapShots(t *testing.T) {
+	shards := map[int]*Shard{
+		1:&Shard{
+			"asd",
+			1,
+			map[string]string{"a":"b"},
+		},
+	}
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(Snapshot{
+		shards,
+		map[uint32]bool{1:true},
+	})
+	b := w.Bytes()
+	//
+	data := &Snapshot{}
+	r := bytes.NewBuffer(b)
+	d := labgob.NewDecoder(r)
+	d.Decode(&data)
+	fmt.Println("xxxxx",data.Shards[1],data.CacheData[1])
+	//
+
+}
 const linearizabilityCheckTimeout = 1 * time.Second
 
 func check(t *testing.T, ck *Clerk, key string, value string) {
@@ -45,13 +73,13 @@ func TestStaticShards(t *testing.T) {
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
-
+	fmt.Println(1)
 	// make sure that the data really is sharded by
 	// shutting down one shard and checking that some
 	// Get()s don't succeed.
 	cfg.ShutdownGroup(1)
 	cfg.checklogs() // forbid snapshots
-
+	fmt.Println(2)
 	ch := make(chan string)
 	for xi := 0; xi < n; xi++ {
 		ck1 := cfg.makeClient() // only one call allowed per client
@@ -64,7 +92,7 @@ func TestStaticShards(t *testing.T) {
 			}
 		}(xi)
 	}
-
+	fmt.Println(3)
 	// wait a bit, only about half the Gets should succeed.
 	ndone := 0
 	done := false
@@ -80,7 +108,7 @@ func TestStaticShards(t *testing.T) {
 			break
 		}
 	}
-
+	fmt.Println(4)
 	if ndone != 5 {
 		t.Fatalf("expected 5 completions with one shard dead; got %v\n", ndone)
 	}

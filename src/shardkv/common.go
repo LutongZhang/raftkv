@@ -58,30 +58,9 @@ type GetReply struct {
 	Value string
 }
 
-//type PrepareShardMoveArgs struct {
-//	UUID uint32
-//	To int
-//	ToGroup []string
-//	From int
-//	FromGroup []string
-//	Shards []int
-//}
-//
-//type PrepareShardMoveReply struct {
-//	Err Err
-//}
-//
-//type CommitShardArgs struct {
-//	UUID  uint32
-//}
-//
-//type CommitShardReply struct {
-//	Err Err
-//}
-
 type RetrieveShardsArgs struct {
 	UUID  uint32
-	Shards []int
+	ShardsId []int
 }
 
 type RetrieveShardsReply struct {

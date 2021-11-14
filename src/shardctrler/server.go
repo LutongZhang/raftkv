@@ -1,16 +1,17 @@
 package shardctrler
 
 import (
+	"6.824/labgob"
+	"6.824/labrpc"
 	"6.824/raft"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
+	"sync"
 	"time"
 )
-import "6.824/labrpc"
-import "sync"
-import "6.824/labgob"
+
 
 const (
 	Query = 0
@@ -34,6 +35,7 @@ type ShardCtrler struct {
 	// Your data here.
 	configs []Config // indexed by config num
 
+	cache *Cache
 	make_end func(string) *labrpc.ClientEnd
 }
 
@@ -218,11 +220,11 @@ func (sc *ShardCtrler)applier(){
 }
 
 func  (sc *ShardCtrler)processOp(op *Op){
-	//fmt.Println(op.Type)
+	sc.mu.Lock()
 	var reply interface{}
 	switch op.Type {
 	case Query:
-		sc.mu.Lock()
+		//sc.mu.Lock()
 		args := QueryArgs{}
 		json.Unmarshal(op.Args, &args)
 		config := *getConfig(sc.configs,args.Num)
@@ -231,56 +233,87 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			OK,
 			config,
 		}
-		sc.mu.Unlock()
+		//sc.mu.Unlock()
 	case Join:
-		sc.mu.Lock()
+		//sc.mu.Lock()
 		args := JoinArgs{}
 		json.Unmarshal(op.Args, &args)
+		r :=&JoinReply{}
+		if sc.cache.get(args.UUID){
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			//sc.mu.Lock()
+			goto cb
+		}
 		newConfig := getConfig(sc.configs,-1).copy().AddNum().AddGroup(args.Servers).Rebalance()
 		sc.configs = append(sc.configs,*newConfig)
-		reply = &JoinReply{
-			false,
-			OK,
-		}
+		r.WrongLeader = false
+		r.Err = OK
+		reply = r
+		sc.cache.set(args.UUID)
 		//fmt.Println(sc.configs)
-		sc.mu.Unlock()
+		//sc.mu.Unlock()
 	case Leave:
-		sc.mu.Lock()
+		//sc.mu.Lock()
 		args := LeaveArgs{}
 		json.Unmarshal(op.Args, &args)
+		r :=&LeaveReply{}
+		if sc.cache.get(args.UUID){
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			//sc.mu.Lock()
+			goto cb
+		}
 		newConfig := getConfig(sc.configs,-1).copy().AddNum().RmGroup(args.GIDs).Rebalance()
 		sc.configs = append(sc.configs,*newConfig)
-		reply = &LeaveReply{
-			false,
-			OK,
-		}
-		sc.mu.Unlock()
+		r.WrongLeader = false
+		r.Err = OK
+		reply = r
+		sc.cache.set(args.UUID)
+		//sc.mu.Unlock()
 	case Move:
-		sc.mu.Lock()
+		//sc.mu.Lock()
 		args := MoveArgs{}
 		json.Unmarshal(op.Args, &args)
+		r :=&MoveReply{}
+		if sc.cache.get(args.UUID){
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			//sc.mu.Lock()
+			goto cb
+		}
 		newConfig := getConfig(sc.configs,-1).copy().MoveShard(args.Shard,args.GID)
 		sc.configs = append(sc.configs,*newConfig)
-		reply = &MoveReply{
-			false,
-			OK,
-		}
-		sc.mu.Unlock()
+		r.WrongLeader = false
+		r.Err = OK
+		reply = r
+		sc.cache.set(args.UUID)
+		//sc.mu.Unlock()
 	case CurConfigUpdate:
-		sc.mu.Lock()
+		//sc.mu.Lock()
 		args := []int{}
 		json.Unmarshal(op.Args, &args)
 		if sc.currConfig == args[0]{
 			sc.currConfig = args[1]
 		}
 		fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
-		sc.mu.Unlock()
+		//sc.mu.Unlock()
+	default:
+		fmt.Println("unkown type for clter",op.Type)
 	}
+	//q.Println("ctrler op:",op.Type,reply)
+cb:
+	sc.mu.Unlock()
 	sc.cb.publish(op.CbIdx,reply)
 }
 
 type Snapshot struct {
+	CurrConfig int
 	Configs []Config
+	CacheData map[uint32]bool
 }
 
 func (sc *ShardCtrler)Snapshot(commandIdx int){
@@ -288,7 +321,9 @@ func (sc *ShardCtrler)Snapshot(commandIdx int){
 	e := labgob.NewEncoder(w)
 	sc.mu.Lock()
 	e.Encode(Snapshot{
+		sc.currConfig,
 		sc.configs,
+		sc.cache.Data,
 	})
 	sc.mu.Unlock()
 	b := w.Bytes()
@@ -305,6 +340,8 @@ func (sc *ShardCtrler)restoreSnapshot(b []byte){
 		d := labgob.NewDecoder(r)
 		d.Decode(&data)
 		sc.configs = data.Configs
+		sc.currConfig = data.CurrConfig
+		sc.cache = newCache(5*time.Minute,data.CacheData)
 	}
 }
 //Todo 加入一个make_end Func
@@ -325,6 +362,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
+	sc.cache = newCache(5*time.Minute,make(map[uint32]bool))
 	sc.cb =  &subPub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),
@@ -333,6 +371,5 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	sc.restoreSnapshot(sc.rf.ReadSnapshot())
 	go sc.applier()
 	go sc.shardsUpdate()
-
 	return sc
 }

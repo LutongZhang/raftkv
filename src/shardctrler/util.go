@@ -4,6 +4,7 @@ import (
 	"6.824/labrpc"
 	"fmt"
 	"github.com/google/uuid"
+	"reflect"
 	"time"
 )
 
@@ -22,7 +23,7 @@ func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *Sh
 		task.toGroup,
 		task.from,
 		task.fromGroup,
-		task.shards,
+		task.shardIds,
 	}
 	for {
 		// try each known server.
@@ -83,9 +84,14 @@ func getMovePlan(old *Config,new *Config)map[string]*ShardsMoveTask{
 			 		[]int{i},
 				}
 			 } else{
-			 	plan[k].shards =append(plan[k].shards,i)
+			 	plan[k].shardIds =append(plan[k].shardIds,i)
 			 }
 		}
 	}
 	return plan
+}
+
+func getErr(v interface{})Err{
+	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()
+	return Err(x)
 }

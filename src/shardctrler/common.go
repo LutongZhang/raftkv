@@ -158,7 +158,7 @@ type PrepareShardMoveArgs struct {
 	ToGroup []string
 	From int
 	FromGroup []string
-	Shards []int
+	ShardIds []int
 }
 
 type PrepareShardMoveReply struct {
@@ -179,7 +179,7 @@ type ShardsMoveTask struct {
 	toGroup []string
 	from int
 	fromGroup []string
-	shards []int
+	shardIds []int
 }
 
 type subPub struct {
