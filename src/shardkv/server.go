@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-
+//Todo cache数据太大可能是data太大的原因
 const (
 	Get  =  0
 	Put = 1
@@ -36,6 +36,14 @@ type Shard struct {
 	State string
 	Config int
 	Data map[string]string
+}
+
+func(s *Shard)CopyData()map[string]string{
+	data := make(map[string]string)
+	for k,v := range s.Data{
+		data[k] = v
+	}
+	return data
 }
 
 type ShardKV struct {
@@ -91,7 +99,7 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 	shards := []int{}
 	for _,shardId := range args.ShardIds{
 		shard,ok := kv.shards[shardId]
-		if !(ok && shard.State == Working){
+		if !(ok && shard.Config >= args.NewConfig){
 			shards = append(shards,shardId)
 		}
 	}
@@ -100,13 +108,30 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 		reply.Err = OK
 		return
 	}
-	data := kv.sendRetrieveShards(args.From,args.FromGroup,shards)
-	output,err:=kv.ProcessFunc(ShardsAdd,uuid.New().ID(),data)
+	RetrievedShardsReply := kv.sendRetrieveShards(args.NewConfig,args.From,args.FromGroup,shards)
+	if RetrievedShardsReply.Err == ErrOldConfig{
+		reply.Err = OK
+		return
+	}
+
+	shardsAddArgs :=  &ShardsMoveArgs{
+		make(map[int]*Shard),
+		RetrievedShardsReply.CacheData,
+	}
+	for k,v := range RetrievedShardsReply.Data{
+		shardsAddArgs.Data[k] = &Shard{
+			Working,
+			args.NewConfig,
+			v,
+		}
+	}
+
+	output,err:=kv.ProcessFunc(ShardsAdd,uuid.New().ID(),shardsAddArgs)
 	if err != OK{
 		reply.Err = shardctrler.Err(err)
 	} else{
-		v := output.(*shardctrler.PrepareShardMoveReply)
-		*reply = *v
+		v := output.(string)
+		reply.Err = shardctrler.Err(v)
 	}
 }
 
@@ -114,12 +139,11 @@ func (kv *ShardKV)CommitShardMove(args *shardctrler.CommitShardArgs,reply *shard
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	for shardid,shard := range kv.shards{
-		if shard.State==Stale{
+		if shard.State==Stale && shard.Config<args.Config{
 			delete(kv.shards,shardid)
 		}
 	}
 	reply.Err = OK
-
 }
 
 func (kv *ShardKV)RetrieveShards(args *RetrieveShardsArgs,reply *RetrieveShardsReply){
@@ -227,7 +251,6 @@ func  (kv *ShardKV)processOp(op *Op){
 			if v,ok := data[args.Key];ok{
 				r.Err = OK
 				data[args.Key] = v+args.Value
-				fmt.Println(kv.gid,kv.me,args.UUID,args.Key,args.Value)
 			}else{
 				r.Err = ErrNoKey
 			}
@@ -239,33 +262,39 @@ func  (kv *ShardKV)processOp(op *Op){
 			kv.cache.set(args.UUID)
 		}
 	case ShardsAdd:
-		args := RetrieveShardsReply{}
+		args := ShardsMoveArgs{}
 		json.Unmarshal(op.Args, &args)
-		for shardid,data := range args.Data{
-			if v,ok :=kv.shards[shardid];!ok || v.State == Stale{
-				kv.shards[shardid] = &Shard{
-					Working,
-					0,
-					data,
-				}
+		for shardid,newShard := range args.Data{
+			v,ok :=kv.shards[shardid]
+			if !ok ||(newShard.Config>v.Config){
+				kv.shards[shardid] = newShard
 			}
 		}
 		kv.cache.combineCache(args.CacheData)
-		reply = &shardctrler.PrepareShardMoveReply{OK}
+		fmt.Println(fmt.Sprintf("shards add - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
+		reply = OK
 	case RetrieveShards:
 		args := RetrieveShardsArgs{}
 		json.Unmarshal(op.Args, &args)
+		r := &RetrieveShardsReply{}
+		r.Err = OK
 		data := make(map[int]map[string]string)
 		for _,shardId := range args.ShardsId{
-			kv.shards[shardId].State = Stale
-			data[shardId] = kv.shards[shardId].Data
+			shard,ok := kv.shards[shardId]
+			if !ok || shard.Config >=args.Config{
+				r.Err = ErrOldConfig
+			}else{
+				kv.shards[shardId].State = Stale
+				data[shardId] = kv.shards[shardId].CopyData()
+			}
 		}
-		reply = &RetrieveShardsReply{
-			OK,
-			data,
-			kv.cache.Data,
+		if r.Err == OK{
+			r.Data = data
+			r.CacheData = kv.cache.CopyData()
 		}
-		fmt.Println(fmt.Sprintf("Retrieve shards - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
+
+		reply = r
+		fmt.Println(fmt.Sprintf("shards be Retrieved - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 	default:
 		fmt.Println("unknown type for kv:",op.Type)
 		goto cb

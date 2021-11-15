@@ -19,6 +19,7 @@ const (
 	ErrWrongGroup  = "ErrWrongGroup"
 	ErrWrongLeader = "ErrWrongLeader"
 	ErrTimeOut = "ErrTimeOut"
+	ErrOldConfig = "ErrWrongConfig"
 )
 
 //shard state
@@ -60,12 +61,18 @@ type GetReply struct {
 
 type RetrieveShardsArgs struct {
 	UUID  uint32
+	Config int
 	ShardsId []int
 }
 
 type RetrieveShardsReply struct {
 	Err Err
 	Data map[int]map[string]string
+	CacheData map[uint32]bool
+}
+
+type ShardsMoveArgs struct {
+	Data map[int]*Shard
 	CacheData map[uint32]bool
 }
 

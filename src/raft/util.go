@@ -39,7 +39,8 @@ func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		go rf.persistStateL()
+		//go rf.persistStateL()
+		rf.persistState()
 	}
 }
 
@@ -56,7 +57,8 @@ func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		go rf.persistStateL()
+		//go rf.persistStateL()
+		rf.persistState()
 	}
 }
 
@@ -73,12 +75,14 @@ func (rf *Raft) changeToLeader() {
 //
 func (rf *Raft) appendLog(entry *LogEntry) {
 	rf.log = append(rf.log, *entry)
-	go rf.persistStateL()
+	//go rf.persistStateL()
+	rf.persistState()
 }
 
 func (rf *Raft) appendLogs(entrys []LogEntry) {
 	rf.log = append(rf.log, entrys...)
-	go rf.persistStateL()
+	//go rf.persistStateL()
+	rf.persistState()
 }
 
 //

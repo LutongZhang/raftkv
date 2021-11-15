@@ -105,6 +105,7 @@ const (
 	OK = "OK"
 	ErrTimeOut = "Err Time Out"
 	ErrWrongLeader = "ErrWrongLeader"
+	ErrOldConfig = "ErrWrongConfig"
 )
 
 type Err string
@@ -154,6 +155,7 @@ type QueryReply struct {
 //
 type PrepareShardMoveArgs struct {
 	UUID uint32
+	NewConfig int
 	To int
 	ToGroup []string
 	From int
@@ -167,6 +169,7 @@ type PrepareShardMoveReply struct {
 
 type CommitShardArgs struct {
 	UUID  uint32
+	Config int
 }
 
 type CommitShardReply struct {
@@ -175,6 +178,7 @@ type CommitShardReply struct {
 //
 
 type ShardsMoveTask struct {
+	newConfig int
 	to int
 	toGroup []string
 	from int

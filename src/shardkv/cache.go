@@ -35,6 +35,15 @@ func (c *Cache)get(key uint32)bool{
 	}
 }
 
+func (c *Cache)CopyData()map[uint32]bool{
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data := make(map[uint32]bool)
+	for k,v := range c.Data{
+		data[k] = v
+	}
+	return data
+}
 func (c *Cache)combineCache(cache map[uint32]bool){
 	c.mu.Lock()
 	defer c.mu.Unlock()

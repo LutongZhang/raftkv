@@ -139,6 +139,7 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 	return sc.rf
 }
 
+//currConfig单调递增，所以已经commit的命令再commit也没事。shardMove带着版本号防止move错误
 func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,oldConfig int,newConfig int){
 	//phase 1 notify servers to get new shard
 	fmt.Println(fmt.Sprintf("config %d -> %d Plan: %v",oldConfig,newConfig,plan))
@@ -167,7 +168,7 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		group := group
 		go func() {
 			defer wg.Done()
-			sc.sendCommitShardsMove(sc.getClients(group))
+			sc.sendCommitShardsMove(newConfig,sc.getClients(group))
 		}()
 	}
 	wg.Wait()

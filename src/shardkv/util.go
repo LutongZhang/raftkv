@@ -17,7 +17,7 @@ func (kv *ShardKV)getClients(names []string)[]*labrpc.ClientEnd{
 	return res
 }
 
-func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)*RetrieveShardsReply{
+func (kv *ShardKV)sendRetrieveShards(Config int,from int,fromGroup []string,shardsId []int)*RetrieveShardsReply{
 	if from == 0{
 		data := make(map[int]map[string]string)
 		for _,v:= range shardsId{
@@ -32,7 +32,9 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)
 
 	args := RetrieveShardsArgs{
 		uuid.New().ID(),
+		Config,
 		shardsId,
+
 	}
 	servers := kv.getClients(fromGroup)
 	for {
@@ -40,7 +42,7 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)
 		for _, srv := range servers {
 			var reply RetrieveShardsReply
 			ok := srv.Call("ShardKV.RetrieveShards", &args, &reply)
-			if ok && reply.Err == OK{
+			if ok && (reply.Err == OK || reply.Err == ErrOldConfig){
 				return &reply
 			}
 		}
@@ -53,11 +55,10 @@ func (kv *ShardKV)sendRetrieveShards(from int,fromGroup []string,shardsId []int)
 func getShardsInfo(shards  map[int]*Shard)[]string{
 	info := []string{}
 	for k,v:= range shards{
-		info = append(info,fmt.Sprintf("%d: %s",k,v.State))
+		info = append(info,fmt.Sprintf("%d-%d: %s",k,v.Config,v.State))
 	}
 	return info
 }
-
 
 func getErr(v interface{})Err{
 	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()

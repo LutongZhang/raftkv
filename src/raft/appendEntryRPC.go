@@ -105,6 +105,7 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			args.Entries = nil
 		}
 	}
+
 	if args.PrevLogTerm == rf.log[ptr].Term {
 		reply.Term = rf.currentTerm
 		reply.Success = true

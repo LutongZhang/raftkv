@@ -1,6 +1,5 @@
 package raft
 
-
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -62,11 +61,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	lastSnapShotLog := rf.log[0]
 	rf.log_infof("snapshot start with idx %d",index)
 	if index > int(lastSnapShotLog.Idx) {
-		rf.persistStateAndSnapshot(snapshot)
 		i := getLogSliceIdx(rf.log, index)
 		lastIncludedIdx := rf.log[i].Idx
 		lastIncludedTerm := rf.log[i].Term
 		rf.log = rf.log[i:] //first one is always previous log
+		rf.persistStateAndSnapshot(snapshot)
 		//send SnapShot
 		if rf.role == Leader {
 			rf.installSnapshotToPeers(lastIncludedIdx, lastIncludedTerm, snapshot)
@@ -82,12 +81,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// Your code here (2D).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	//lastSnapShotLog := rf.log[0]
-	//if lastIncludedIndex >= int(lastSnapShotLog.Idx) { //Todo 是不是应该比较last Snapshot Idx？
 	if lastIncludedIndex >= int(rf.lastApplied) {
 		rf.log_infof("CondInstall start with last term %d last idx %d",lastIncludedTerm,lastIncludedIndex )
 		rf.lastApplied = int64(lastIncludedIndex) //Todo ????
-		rf.persistStateAndSnapshot(snapshot)
 		if lastIncludedIndex <= int(rf.log[len(rf.log)-1].Idx) {
 			i := getLogSliceIdx(rf.log, lastIncludedIndex)
 			rf.log = rf.log[i:] //first one is always previous log
@@ -100,6 +96,9 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 				},
 			}
 		}
+
+		rf.persistStateAndSnapshot(snapshot)
+
 		for i := range rf.peers {
 			if rf.nextIdx[i] <= int64(lastIncludedIndex) {
 				rf.nextIdx[i] = int64(lastIncludedIndex) + 1

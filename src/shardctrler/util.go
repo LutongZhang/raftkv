@@ -16,9 +16,10 @@ func (sc *ShardCtrler)getClients(names []string)[]*labrpc.ClientEnd{
 	return res
 }
 
-func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *ShardsMoveTask){
+func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *ShardsMoveTask)Err{
 	args := PrepareShardMoveArgs{
 		uuid.New().ID(),
+		task.newConfig,
 		task.to,
 		task.toGroup,
 		task.from,
@@ -30,17 +31,18 @@ func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *Sh
 		for _, srv := range servers {
 			var reply PrepareShardMoveReply
 			ok := srv.Call("ShardKV.PrepareShardMove", &args, &reply)
-			if ok && reply.Err == OK{
-				return
+			if ok && (reply.Err == OK || reply.Err == ErrOldConfig){
+				return reply.Err
 			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
 
-func (sc *ShardCtrler)sendCommitShardsMove(servers []*labrpc.ClientEnd){
+func (sc *ShardCtrler)sendCommitShardsMove(config int,servers []*labrpc.ClientEnd){
 	args := CommitShardArgs{
 		uuid.New().ID(),
+		config,
 	}
 	for {
 		// try each known server.
@@ -77,6 +79,7 @@ func getMovePlan(old *Config,new *Config)map[string]*ShardsMoveTask{
 			 		fromGroup = group
 				}
 			 	plan[k] = &ShardsMoveTask{
+			 		new.Num,
 			 		newShardRG,
 			 		new.Groups[newShardRG],
 			 		oldShardRG,

@@ -215,6 +215,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	go rf.ticker()
 	go rf.applier()
 
+	///TODO 暂时
 	rf.initLogger()
 
 	return rf
