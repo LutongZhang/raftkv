@@ -7,10 +7,10 @@ import (
 
 type Cache struct {
 	mu sync.RWMutex
-	Data map[uint32]bool
+	Data map[uint32]int
 }
 
-func newCache(cleanupInterval time.Duration,data map[uint32]bool)*Cache{
+func newCache(cleanupInterval time.Duration,data map[uint32]int)*Cache{
 	cache := &Cache{
 		sync.RWMutex{},
 		data,
@@ -19,18 +19,25 @@ func newCache(cleanupInterval time.Duration,data map[uint32]bool)*Cache{
 	return cache
 }
 
-func (c *Cache)set(key uint32){
+func (c *Cache)set(key uint32,val int){
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.Data[key] = true
+	c.Data[key] = val
 }
 
-func (c *Cache)get(key uint32)bool{
+func (c *Cache)get(key uint32)int{
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if v,ok := c.Data[key];ok{
 		return v
 	}else{
-		return false
+		return -1
 	}
+}
+
+func (c *Cache) checkDup(clidId uint32,seqNum int) bool {
+	if seq := c.get(clidId); seq >= seqNum{
+		return true
+	}
+	return false
 }

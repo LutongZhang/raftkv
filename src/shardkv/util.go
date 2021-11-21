@@ -3,7 +3,6 @@ package shardkv
 import (
 	"6.824/labrpc"
 	"fmt"
-	"github.com/google/uuid"
 	"reflect"
 	"time"
 )
@@ -26,12 +25,11 @@ func (kv *ShardKV)sendRetrieveShards(Config int,from int,fromGroup []string,shar
 		return &RetrieveShardsReply{
 			OK,
 			data,
-			map[uint32]bool{},
+			map[uint32]int{},
 		}
 	}
 
 	args := RetrieveShardsArgs{
-		uuid.New().ID(),
 		Config,
 		shardsId,
 

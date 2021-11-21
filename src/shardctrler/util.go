@@ -3,7 +3,6 @@ package shardctrler
 import (
 	"6.824/labrpc"
 	"fmt"
-	"github.com/google/uuid"
 	"reflect"
 	"time"
 )
@@ -18,7 +17,6 @@ func (sc *ShardCtrler)getClients(names []string)[]*labrpc.ClientEnd{
 
 func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *ShardsMoveTask)Err{
 	args := PrepareShardMoveArgs{
-		uuid.New().ID(),
 		task.newConfig,
 		task.to,
 		task.toGroup,
@@ -41,7 +39,6 @@ func (sc *ShardCtrler)sendPrepareShardsMove(servers []*labrpc.ClientEnd,task *Sh
 
 func (sc *ShardCtrler)sendCommitShardsMove(config int,servers []*labrpc.ClientEnd){
 	args := CommitShardArgs{
-		uuid.New().ID(),
 		config,
 	}
 	for {
@@ -93,6 +90,7 @@ func getMovePlan(old *Config,new *Config)map[string]*ShardsMoveTask{
 	}
 	return plan
 }
+
 
 func getErr(v interface{})Err{
 	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()

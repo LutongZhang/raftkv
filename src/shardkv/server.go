@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-//Todo cache数据太大可能是data太大的原因
 const (
 	Get  =  0
 	Put = 1
@@ -21,7 +20,6 @@ const (
 	ShardsAdd = 3
 	RetrieveShards = 4
 )
-
 
 type Op struct {
 	// Your definitions here.
@@ -58,14 +56,21 @@ type ShardKV struct {
 	mck  *shardctrler.Clerk
 	maxraftstate int // snapshot if log grows this big
 
-	cache *Cache
+	cliSeq *Cache
 	shards map[int]*Shard
 	// Your definitions here.
 }
 
+
+type Snapshot struct {
+	Shards map[int]*Shard
+	CacheData map[uint32]int
+}
+
+
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 	// Your code here.
-	output,err := kv.ProcessFunc(Get,args.UUID,args)
+	output,err := kv.ProcessFunc(Get,args)
 	if err != OK{
 		reply.Err = err
 	} else{
@@ -80,7 +85,7 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	if args.Op == "Append"{
 		Type = Append
 	}
-	output,err := kv.ProcessFunc(Type,args.UUID,args)
+	output,err := kv.ProcessFunc(Type,args)
 	if err != OK{
 		reply.Err = err
 	} else{
@@ -116,7 +121,7 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 
 	shardsAddArgs :=  &ShardsMoveArgs{
 		make(map[int]*Shard),
-		RetrievedShardsReply.CacheData,
+		RetrievedShardsReply.CliSeq,
 	}
 	for k,v := range RetrievedShardsReply.Data{
 		shardsAddArgs.Data[k] = &Shard{
@@ -126,7 +131,7 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 		}
 	}
 
-	output,err:=kv.ProcessFunc(ShardsAdd,uuid.New().ID(),shardsAddArgs)
+	output,err:=kv.ProcessFunc(ShardsAdd,shardsAddArgs)
 	if err != OK{
 		reply.Err = shardctrler.Err(err)
 	} else{
@@ -138,16 +143,21 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 func (kv *ShardKV)CommitShardMove(args *shardctrler.CommitShardArgs,reply *shardctrler.CommitShardReply)  {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
+	//deleteExist := false
 	for shardid,shard := range kv.shards{
 		if shard.State==Stale && shard.Config<args.Config{
 			delete(kv.shards,shardid)
+			//deleteExist = true
 		}
 	}
+
+	//delete some unused shards in snapshots by flush
+
 	reply.Err = OK
 }
 
 func (kv *ShardKV)RetrieveShards(args *RetrieveShardsArgs,reply *RetrieveShardsReply){
-	output,err := kv.ProcessFunc(RetrieveShards,args.UUID,args)
+	output,err := kv.ProcessFunc(RetrieveShards,args)
 	if err != OK{
 		reply.Err = err
 	} else{
@@ -156,11 +166,11 @@ func (kv *ShardKV)RetrieveShards(args *RetrieveShardsArgs,reply *RetrieveShardsR
 	}
 }
 
-func (kv *ShardKV)ProcessFunc(Type int,uuid uint32,args interface{})(output interface{},err Err){
+func (kv *ShardKV)ProcessFunc(Type int,args interface{})(output interface{},err Err){
 	argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
-		uuid,
+		uuid.New().ID(),
 		argsB,
 	}
 	ch :=kv.cb.subscribe(op.CbIdx)
@@ -185,6 +195,7 @@ func (kv *ShardKV)applier(){
 			op := msg.Command.(Op)
 			kv.processOp(&op)
 			if kv.rf.GetRaftStateSize() >= kv.maxraftstate && kv.maxraftstate != -1{
+				//fmt.Println("xxxxx",kv.rf.GetRaftStateSize(),kv.rf.GetSnapShotSize())
 				kv.Snapshot(msg.CommandIndex)
 			}
 		}else if msg.SnapshotValid{
@@ -216,50 +227,48 @@ func  (kv *ShardKV)processOp(op *Op){
 			r.Err = ErrWrongGroup
 		}
 		reply = r
+		//if !kv.cliSeq.checkDup(args.CliId,args.SeqNum){
+		//	kv.cliSeq.set(args.CliId,args.SeqNum)
+		//}
 	case Put:
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &PutAppendReply{}
-		if kv.cache.get(args.UUID){
+		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.Err = OK
 			reply = r
-			goto cb
-		}
-		if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
-			data := shard.Data
-			data[args.Key] = args.Value
-			r.Err = OK
-
-		}else{
-			r.Err = ErrWrongGroup
-		}
-		reply = r
-		if r.Err == OK{
-			kv.cache.set(args.UUID)
+		}else {
+			if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
+				data := shard.Data
+				data[args.Key] = args.Value
+				r.Err = OK
+				kv.cliSeq.set(args.CliId,args.SeqNum)
+			}else{
+				r.Err = ErrWrongGroup
+			}
+			reply = r
 		}
 	case Append:
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &PutAppendReply{}
-		if kv.cache.get(args.UUID){
+		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.Err = OK
 			reply = r
-			goto cb
-		}
-		if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
-			data := shard.Data
-			if v,ok := data[args.Key];ok{
-				r.Err = OK
-				data[args.Key] = v+args.Value
-			}else{
-				r.Err = ErrNoKey
-			}
 		}else{
-			r.Err = ErrWrongGroup
-		}
-		reply = r
-		if r.Err == OK{
-			kv.cache.set(args.UUID)
+			if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
+				data := shard.Data
+				if v,ok := data[args.Key];ok{
+					data[args.Key] = v+args.Value
+					r.Err = OK
+					kv.cliSeq.set(args.CliId,args.SeqNum)
+				}else{
+					r.Err = ErrNoKey
+				}
+			}else{
+				r.Err = ErrWrongGroup
+			}
+			reply = r
 		}
 	case ShardsAdd:
 		args := ShardsMoveArgs{}
@@ -270,7 +279,7 @@ func  (kv *ShardKV)processOp(op *Op){
 				kv.shards[shardid] = newShard
 			}
 		}
-		kv.cache.combineCache(args.CacheData)
+		kv.cliSeq.combine(args.CliSeq)
 		fmt.Println(fmt.Sprintf("shards add - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 		reply = OK
 	case RetrieveShards:
@@ -290,25 +299,16 @@ func  (kv *ShardKV)processOp(op *Op){
 		}
 		if r.Err == OK{
 			r.Data = data
-			r.CacheData = kv.cache.CopyData()
+			r.CliSeq = kv.cliSeq.CopyData()
 		}
-
 		reply = r
 		fmt.Println(fmt.Sprintf("shards be Retrieved - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 	default:
 		fmt.Println("unknown type for kv:",op.Type)
-		goto cb
 	}
 
-cb:
 	kv.mu.Unlock()
 	kv.cb.publish(op.CbIdx,reply)
-}
-
-
-type Snapshot struct {
-	Shards map[int]*Shard
-	CacheData map[uint32]bool
 }
 
 func (kv *ShardKV)Snapshot(commandIdx int){
@@ -317,7 +317,7 @@ func (kv *ShardKV)Snapshot(commandIdx int){
 	kv.mu.Lock()
 	e.Encode(Snapshot{
 		kv.shards,
-				kv.cache.Data,
+				kv.cliSeq.Data,
 	})
 	kv.mu.Unlock()
 	b := w.Bytes()
@@ -333,7 +333,7 @@ func (kv *ShardKV)restoreSnapshot(b []byte){
 		d := labgob.NewDecoder(r)
 		d.Decode(&data)
 		kv.shards = data.Shards
-		kv.cache = newCache(5*time.Minute,data.CacheData)
+		kv.cliSeq = newCache(5*time.Minute,data.CacheData)
 	}
 }
 
@@ -392,7 +392,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.gid = gid
 	kv.ctrlers = ctrlers
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
-	kv.cache = newCache(5*time.Minute,make(map[uint32]bool))
+	kv.cliSeq = newCache(5*time.Minute,make(map[uint32]int))
 	kv.cb =  &subPub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),

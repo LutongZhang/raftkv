@@ -15,6 +15,10 @@ func (rf *Raft) GetRaftStateSize() int {
 	return rf.persister.RaftStateSize()
 }
 
+func (rf *Raft) GetSnapShotSize() int {
+	return rf.persister.SnapshotSize()
+}
+
 func (rf *Raft)ReadSnapshot()[]byte{
 	return rf.persister.ReadSnapshot()
 }

@@ -1,9 +1,7 @@
 package shardkv
 
 import (
-	"6.824/labgob"
 	"6.824/porcupine"
-	"bytes"
 )
 import "6.824/models"
 import "testing"
@@ -15,30 +13,31 @@ import "sync"
 import "math/rand"
 import "io/ioutil"
 
-func TestSnapShots(t *testing.T) {
-	shards := map[int]*Shard{
-		1:&Shard{
-			"asd",
-			1,
-			map[string]string{"a":"b"},
-		},
-	}
-	w := new(bytes.Buffer)
-	e := labgob.NewEncoder(w)
-	e.Encode(Snapshot{
-		shards,
-		map[uint32]bool{1:true},
-	})
-	b := w.Bytes()
-	//
-	data := &Snapshot{}
-	r := bytes.NewBuffer(b)
-	d := labgob.NewDecoder(r)
-	d.Decode(&data)
-	fmt.Println("xxxxx",data.Shards[1],data.CacheData[1])
-	//
+//func TestSnapShots(t *testing.T) {
+//	shards := map[int]*Shard{
+//		1:&Shard{
+//			"asd",
+//			1,
+//			map[string]string{"a":"b"},
+//		},
+//	}
+//	w := new(bytes.Buffer)
+//	e := labgob.NewEncoder(w)
+//	e.Encode(Snapshot{
+//		shards,
+//		map[uint32]int{1:1},
+//	})
+//	b := w.Bytes()
+//	//
+//	data := &Snapshot{}
+//	r := bytes.NewBuffer(b)
+//	d := labgob.NewDecoder(r)
+//	d.Decode(&data)
+//	fmt.Println("xxxxx",data.Shards[1],data.CacheData[1])
+//	//
+//
+//}
 
-}
 const linearizabilityCheckTimeout = 1 * time.Second
 
 func check(t *testing.T, ck *Clerk, key string, value string) {
@@ -822,11 +821,14 @@ func TestChallenge1Delete(t *testing.T) {
 
 	total := 0
 	for gi := 0; gi < cfg.ngroups; gi++ {
+		a := 0
 		for i := 0; i < cfg.n; i++ {
 			raft := cfg.groups[gi].saved[i].RaftStateSize()
 			snap := len(cfg.groups[gi].saved[i].ReadSnapshot())
+			a+=snap
 			total += raft + snap
 		}
+		fmt.Println("mmmmm",a)
 	}
 
 	// 27 keys should be stored once.

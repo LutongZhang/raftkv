@@ -33,7 +33,8 @@ type Err string
 // Put or Append
 type PutAppendArgs struct {
 	// You'll have to add definitions here.
-	UUID  uint32
+	CliId uint32
+	SeqNum int
 	Key   string
 	Shard int
 	Value string
@@ -48,7 +49,8 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	UUID uint32
+	CliId uint32
+	//SeqNum int
 	Key string
 	Shard int
 	// You'll have to add definitions here.
@@ -60,7 +62,6 @@ type GetReply struct {
 }
 
 type RetrieveShardsArgs struct {
-	UUID  uint32
 	Config int
 	ShardsId []int
 }
@@ -68,12 +69,12 @@ type RetrieveShardsArgs struct {
 type RetrieveShardsReply struct {
 	Err Err
 	Data map[int]map[string]string
-	CacheData map[uint32]bool
+	CliSeq map[uint32]int
 }
 
 type ShardsMoveArgs struct {
 	Data map[int]*Shard
-	CacheData map[uint32]bool
+	CliSeq map[uint32]int
 }
 
 type subPub struct {

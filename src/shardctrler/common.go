@@ -111,7 +111,8 @@ const (
 type Err string
 
 type JoinArgs struct {
-	UUID uint32
+	CliId uint32
+	SeqNum int
 	Servers map[int][]string // new GID -> servers mappings
 }
 
@@ -121,7 +122,8 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
-	UUID uint32
+	CliId uint32
+	SeqNum int
 	GIDs []int
 }
 
@@ -131,7 +133,8 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
-	UUID uint32
+	CliId uint32
+	SeqNum int
 	Shard int
 	GID   int
 }
@@ -142,7 +145,8 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
-	UUID uint32
+	CliId uint32
+	//SeqNum int
 	Num int // desired config number
 }
 
@@ -154,7 +158,6 @@ type QueryReply struct {
 
 //
 type PrepareShardMoveArgs struct {
-	UUID uint32
 	NewConfig int
 	To int
 	ToGroup []string
@@ -168,7 +171,6 @@ type PrepareShardMoveReply struct {
 }
 
 type CommitShardArgs struct {
-	UUID  uint32
 	Config int
 }
 

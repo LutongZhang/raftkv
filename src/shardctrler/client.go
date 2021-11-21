@@ -15,7 +15,8 @@ import "math/big"
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	// Your data here.
+	CliId uint32
+	SeqNum int
 }
 
 func nrand() int64 {
@@ -28,13 +29,17 @@ func nrand() int64 {
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
+	ck.CliId = uuid.New().ID()
+	ck.SeqNum = 0
 	// Your code here.
 	return ck
 }
 
 func (ck *Clerk) Query(num int) Config {
+	//ck.SeqNum+=1
 	args := &QueryArgs{
-		uuid.New().ID(),
+		ck.CliId,
+		//ck.SeqNum,
 		num,
 	}
 	// Your code here.
@@ -53,8 +58,10 @@ func (ck *Clerk) Query(num int) Config {
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
+	ck.SeqNum+=1
 	args := &JoinArgs{
-		uuid.New().ID(),
+		ck.CliId,
+		ck.SeqNum,
 		servers,
 	}
 	// Your code here.
@@ -74,8 +81,10 @@ func (ck *Clerk) Join(servers map[int][]string) {
 }
 
 func (ck *Clerk) Leave(gids []int) {
+	ck.SeqNum+=1
 	args := &LeaveArgs{
-		uuid.New().ID(),
+		ck.CliId,
+		ck.SeqNum,
 		gids,
 	}
 	// Your code here.
@@ -95,8 +104,10 @@ func (ck *Clerk) Leave(gids []int) {
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
+	ck.SeqNum+=1
 	args := &MoveArgs{
-		uuid.New().ID(),
+		ck.CliId,
+		ck.SeqNum,
 		shard,
 		gid,
 	}

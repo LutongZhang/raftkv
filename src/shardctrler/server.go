@@ -35,8 +35,14 @@ type ShardCtrler struct {
 	// Your data here.
 	configs []Config // indexed by config num
 
-	cache *Cache
+	cliSeq *Cache
 	make_end func(string) *labrpc.ClientEnd
+}
+
+type Snapshot struct {
+	CurrConfig int
+	Configs []Config
+	CacheData map[uint32]int
 }
 
 type Op struct {
@@ -48,7 +54,7 @@ type Op struct {
 
 
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
-	output,err := sc.ProcessFunc(Join,args.UUID,args)
+	output,err := sc.ProcessFunc(Join,args)
 	if err != OK{
 		reply.Err = err
 		if err == ErrWrongLeader{
@@ -62,7 +68,7 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 }
 
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
-	output,err := sc.ProcessFunc(Leave,args.UUID,args)
+	output,err := sc.ProcessFunc(Leave,args)
 	if err != OK{
 		reply.Err = err
 		if err == ErrWrongLeader{
@@ -75,7 +81,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 }
 
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
-	output,err := sc.ProcessFunc(Move,args.UUID,args)
+	output,err := sc.ProcessFunc(Move,args)
 	if err != OK{
 		reply.Err = err
 		if err == ErrWrongLeader{
@@ -89,7 +95,7 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 
 func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
-	output,err := sc.ProcessFunc(Query,args.UUID,args)
+	output,err := sc.ProcessFunc(Query,args)
 	if err != OK{
 		reply.Err = err
 		if err == ErrWrongLeader{
@@ -101,11 +107,11 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 }
 
-func (sc *ShardCtrler)ProcessFunc(Type int,uuid uint32,args interface{})(output interface{},err Err){
+func (sc *ShardCtrler)ProcessFunc(Type int,args interface{})(output interface{},err Err){
 	argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
-		uuid,
+		uuid.New().ID(),
 		argsB,
 	}
 	ch :=sc.cb.subscribe(op.CbIdx)
@@ -173,7 +179,7 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 	}
 	wg.Wait()
 	fmt.Println("phase 2 complete")
-	sc.ProcessFunc(CurConfigUpdate,uuid.New().ID(),[]int{oldConfig,newConfig})
+	sc.ProcessFunc(CurConfigUpdate,[]int{oldConfig,newConfig})
 }
 
 
@@ -225,7 +231,6 @@ func  (sc *ShardCtrler)processOp(op *Op){
 	var reply interface{}
 	switch op.Type {
 	case Query:
-		//sc.mu.Lock()
 		args := QueryArgs{}
 		json.Unmarshal(op.Args, &args)
 		config := *getConfig(sc.configs,args.Num)
@@ -234,88 +239,74 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			OK,
 			config,
 		}
-		//sc.mu.Unlock()
+		//if !sc.cliSeq.checkDup(args.CliId,args.SeqNum){
+		//	sc.cliSeq.set(args.CliId,args.SeqNum)
+		//}
 	case Join:
-		//sc.mu.Lock()
 		args := JoinArgs{}
 		json.Unmarshal(op.Args, &args)
 		r :=&JoinReply{}
-		if sc.cache.get(args.UUID){
+		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
 			r.Err = OK
 			reply = r
-			//sc.mu.Lock()
-			goto cb
+		} else{
+			newConfig := getConfig(sc.configs,-1).copy().AddNum().AddGroup(args.Servers).Rebalance()
+			sc.configs = append(sc.configs,*newConfig)
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
-		newConfig := getConfig(sc.configs,-1).copy().AddNum().AddGroup(args.Servers).Rebalance()
-		sc.configs = append(sc.configs,*newConfig)
-		r.WrongLeader = false
-		r.Err = OK
-		reply = r
-		sc.cache.set(args.UUID)
-		//fmt.Println(sc.configs)
-		//sc.mu.Unlock()
 	case Leave:
-		//sc.mu.Lock()
 		args := LeaveArgs{}
 		json.Unmarshal(op.Args, &args)
 		r :=&LeaveReply{}
-		if sc.cache.get(args.UUID){
+		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
 			r.Err = OK
 			reply = r
-			//sc.mu.Lock()
-			goto cb
+		}else{
+			newConfig := getConfig(sc.configs,-1).copy().AddNum().RmGroup(args.GIDs).Rebalance()
+			sc.configs = append(sc.configs,*newConfig)
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
-		newConfig := getConfig(sc.configs,-1).copy().AddNum().RmGroup(args.GIDs).Rebalance()
-		sc.configs = append(sc.configs,*newConfig)
-		r.WrongLeader = false
-		r.Err = OK
-		reply = r
-		sc.cache.set(args.UUID)
-		//sc.mu.Unlock()
 	case Move:
-		//sc.mu.Lock()
 		args := MoveArgs{}
 		json.Unmarshal(op.Args, &args)
 		r :=&MoveReply{}
-		if sc.cache.get(args.UUID){
+		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
 			r.Err = OK
 			reply = r
-			//sc.mu.Lock()
-			goto cb
+		} else{
+			newConfig := getConfig(sc.configs,-1).copy().MoveShard(args.Shard,args.GID)
+			sc.configs = append(sc.configs,*newConfig)
+			r.WrongLeader = false
+			r.Err = OK
+			reply = r
+			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
-		newConfig := getConfig(sc.configs,-1).copy().MoveShard(args.Shard,args.GID)
-		sc.configs = append(sc.configs,*newConfig)
-		r.WrongLeader = false
-		r.Err = OK
-		reply = r
-		sc.cache.set(args.UUID)
-		//sc.mu.Unlock()
 	case CurConfigUpdate:
-		//sc.mu.Lock()
 		args := []int{}
 		json.Unmarshal(op.Args, &args)
 		if sc.currConfig == args[0]{
 			sc.currConfig = args[1]
 		}
 		fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
-		//sc.mu.Unlock()
 	default:
 		fmt.Println("unkown type for clter",op.Type)
 	}
-	//q.Println("ctrler op:",op.Type,reply)
-cb:
+
 	sc.mu.Unlock()
 	sc.cb.publish(op.CbIdx,reply)
 }
 
-type Snapshot struct {
-	CurrConfig int
-	Configs []Config
-	CacheData map[uint32]bool
-}
+
+
 
 func (sc *ShardCtrler)Snapshot(commandIdx int){
 	w := new(bytes.Buffer)
@@ -324,7 +315,7 @@ func (sc *ShardCtrler)Snapshot(commandIdx int){
 	e.Encode(Snapshot{
 		sc.currConfig,
 		sc.configs,
-		sc.cache.Data,
+		sc.cliSeq.Data,
 	})
 	sc.mu.Unlock()
 	b := w.Bytes()
@@ -342,7 +333,7 @@ func (sc *ShardCtrler)restoreSnapshot(b []byte){
 		d.Decode(&data)
 		sc.configs = data.Configs
 		sc.currConfig = data.CurrConfig
-		sc.cache = newCache(5*time.Minute,data.CacheData)
+		sc.cliSeq = newCache(5*time.Minute,data.CacheData)
 	}
 }
 //Todo 加入一个make_end Func
@@ -363,7 +354,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	labgob.Register(Op{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
-	sc.cache = newCache(5*time.Minute,make(map[uint32]bool))
+	sc.cliSeq = newCache(5*time.Minute,make(map[uint32]int))
 	sc.cb =  &subPub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),

@@ -7,10 +7,10 @@ import (
 
 type Cache struct {
 	mu sync.RWMutex
-	Data map[uint32]bool
+	Data map[uint32]int
 }
 
-func newCache(cleanupInterval time.Duration,data map[uint32]bool)*Cache{
+func newCache(cleanupInterval time.Duration,data map[uint32]int)*Cache{
 	cache := &Cache{
 		sync.RWMutex{},
 		data,
@@ -19,35 +19,45 @@ func newCache(cleanupInterval time.Duration,data map[uint32]bool)*Cache{
 	return cache
 }
 
-func (c *Cache)set(key uint32){
+func (c *Cache)set(key uint32,val int){
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.Data[key] = true
+	c.Data[key] = val
 }
 
-func (c *Cache)get(key uint32)bool{
+func (c *Cache)get(key uint32)int{
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if v,ok := c.Data[key];ok{
 		return v
 	}else{
-		return false
+		return -1
 	}
 }
 
-func (c *Cache)CopyData()map[uint32]bool{
+func (c *Cache) checkDup(cliId uint32,seqNum int) bool {
+	if seq := c.get(cliId); seq >= seqNum{
+		return true
+	}
+	return false
+}
+
+func (c *Cache)combine(cache map[uint32]int){
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	data := make(map[uint32]bool)
+	for key,value:= range cache{
+		if v, ok := c.Data[key]; !ok || value > v {
+			c.Data[key] = value
+		}
+	}
+}
+
+func (c *Cache)CopyData()map[uint32]int{
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data := make(map[uint32]int)
 	for k,v := range c.Data{
 		data[k] = v
 	}
 	return data
-}
-func (c *Cache)combineCache(cache map[uint32]bool){
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k,v := range cache{
-		c.Data[k] = v
-	}
 }
