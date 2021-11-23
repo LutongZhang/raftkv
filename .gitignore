@@ -3,3 +3,6 @@ api.key
 .api.key.trimmed
 *-handin.tar.gz
 .idea
+*.log
+*.log.*
+*.so

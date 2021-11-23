@@ -39,7 +39,6 @@ func (rf *Raft) changeToFollower(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		//go rf.persistStateL()
 		rf.persistState()
 	}
 }
@@ -57,7 +56,6 @@ func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 		needPersist = true
 	}
 	if needPersist {
-		//go rf.persistStateL()
 		rf.persistState()
 	}
 }
@@ -65,7 +63,6 @@ func (rf *Raft) changeToCandidate(newTerm int64, votedFor int) {
 func (rf *Raft) changeToLeader() {
 	rf.role = Leader
 	rf.log_info("become leader")
-	//rf.timeStart = time.Now()
 	for i, _ := range rf.nextIdx {
 		rf.nextIdx[i] = rf.log[len(rf.log)-1].Idx + 1
 	}
@@ -75,13 +72,11 @@ func (rf *Raft) changeToLeader() {
 //
 func (rf *Raft) appendLog(entry *LogEntry) {
 	rf.log = append(rf.log, *entry)
-	//go rf.persistStateL()
 	rf.persistState()
 }
 
 func (rf *Raft) appendLogs(entrys []LogEntry) {
 	rf.log = append(rf.log, entrys...)
-	//go rf.persistStateL()
 	rf.persistState()
 }
 
@@ -91,8 +86,6 @@ func (rf *Raft) setNewElectionPoint() {
 }
 
 func randomElectionTimeOut() time.Duration {
-	//old 150+150
-	//return time.Duration(rand.Int31n(150)+150) * time.Millisecond
 	return time.Duration(rand.Int31n(500)+300) * time.Millisecond
 }
 

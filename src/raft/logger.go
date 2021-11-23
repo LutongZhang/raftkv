@@ -16,7 +16,7 @@ func (rf *Raft)initLogger(){
 	log.SetFormatter(&log.TextFormatter{
 		//ForceColors:               true,
 		EnvironmentOverrideColors: true,
-		TimestampFormat:           "2006-01-02 15:04:05", //时间格式
+		TimestampFormat:           "2006-01-02 15:04:05",
 		FullTimestamp:true,
 		//DisableLevelTruncation:true,
 	})
@@ -42,4 +42,8 @@ func (rf *Raft)log_info(args ...interface{}){
 
 func (rf *Raft)log_infof(str string, args ...interface{}){
 	log.WithFields(log.Fields{"R":roleStr(rf.role),"T":rf.currentTerm,"me":rf.me}).Infof(str,args...)
+}
+
+func (rf *Raft)log_error(args ...interface{}){
+	log.WithFields(log.Fields{"R":roleStr(rf.role),"T":rf.currentTerm,"me":rf.me}).Error(args...)
 }

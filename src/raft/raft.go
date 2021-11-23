@@ -22,7 +22,7 @@ const (
 	Candidate
 )
 
-//TOdo use context to stop routine
+//Todo can use context to stop routine
 type LogEntry struct {
 	Command interface{}
 	Term    int64
@@ -59,18 +59,11 @@ type Raft struct {
 	//Applier
 	applierCh chan ApplyMsg
 	applyCond *sync.Cond
-
-	//snapshot
-	//snapshot []byte
-	//snapshotIdx int64
-	//snapshotTerm int64
 }
 
-//
 // restore previously persisted state.
-//
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if data == nil || len(data) < 1 { // bootstrap without any state
 		rf.role = Follower
 		rf.currentTerm = 0
 		rf.votedFor = -1
@@ -80,8 +73,6 @@ func (rf *Raft) readPersist(data []byte) {
 				nil,
 				rf.currentTerm,
 				0,
-				//true,
-				//true,
 			},
 		}
 		rf.commitIdx = 0
@@ -95,16 +86,16 @@ func (rf *Raft) readPersist(data []byte) {
 		rf.setNewElectionPoint()
 		return
 	}
+
 	r := bytes.NewBuffer(data)
 	d := labgob.NewDecoder(r)
 	var currentTerm int64
 	var votedFor int
 	var log []LogEntry
 	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
-		rf.log_info("Decode persisted raft state wrong")
+		rf.log_error("Decode persisted raft state wrong")
 		os.Exit(-1)
 	} else {
-		//Todo put the first log as last include idx term, directly update nextidx lastApplied?
 		rf.role = Follower
 		rf.currentTerm = currentTerm
 		rf.votedFor = votedFor
@@ -126,13 +117,13 @@ func (rf *Raft) signalApplier() {
 	rf.applyCond.Broadcast()
 }
 
+//applier routine, send logs to service to implement
 func (rf *Raft) applier() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	for !rf.killed() {
 		if rf.lastApplied+1 <= rf.commitIdx {
 			i := getLogSliceIdx(rf.log, int(rf.lastApplied)) + 1
-			//rf.log_infof("apply log %v",rf.log[i])
 			rf.lastApplied+=1
 			applyMsg := ApplyMsg{
 				CommandValid: true,
@@ -150,7 +141,7 @@ func (rf *Raft) applier() {
 
 //
 // the tester doesn't halt goroutines created by Raft after each test,
-// but it does call the Kill() method. your code can use killed() to
+// but it does call the Kill() method. can use killed() to
 // check whether Kill() has been called. the use of atomic avoids the
 // need for a lock.
 //
@@ -161,7 +152,6 @@ func (rf *Raft) applier() {
 //
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
@@ -169,8 +159,8 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
-// The ticker go routine starts a new election if this peer hasn't received
-// heartsbeats recently.
+//The ticker go routine starts a new election if this peer hasn't received heartbeats recently.
+//If leader, send hb to peers periodically
 func (rf *Raft) ticker() {
 	for rf.killed() == false {
 		rf.mu.Lock()
@@ -187,7 +177,7 @@ func (rf *Raft) ticker() {
 	}
 }
 
-//
+// Make
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
 // server's port is peers[me]. all the servers' peers[] arrays
@@ -207,15 +197,12 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.applierCh = applyCh
-	// Your initialization code here (2A, 2B, 2C).
 
-	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
-	// start ticker goroutine to start elections
+
 	go rf.ticker()
 	go rf.applier()
 
-	///TODO 暂时
 	rf.initLogger()
 
 	return rf

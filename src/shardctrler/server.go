@@ -5,7 +5,6 @@ import (
 	"6.824/labrpc"
 	"6.824/raft"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"sync"
@@ -23,16 +22,13 @@ const (
 	CurConfigUpdate = 4
 )
 
-//Todo 2 phase commit to update shards, apply to rg if rg config num < taget num
-
 type ShardCtrler struct {
 	mu      sync.RWMutex
 	me      int
 	rf      *raft.Raft
 	applyCh chan raft.ApplyMsg
-	cb       *subPub
+	cb       *pubSub
 	currConfig int
-	// Your data here.
 	configs []Config // indexed by config num
 
 	cliSeq *Cache
@@ -46,10 +42,9 @@ type Snapshot struct {
 }
 
 type Op struct {
-	// Your data here.
 	Type int
 	CbIdx uint32
-	Args []byte
+	Args interface{}
 }
 
 
@@ -61,7 +56,6 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 			reply.WrongLeader = true
 		}
 	} else{
-		//fmt.Println(output,err)
 		v := output.(*JoinReply)
 		*reply = *v
 	}
@@ -94,7 +88,6 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 }
 
 func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
-	// Your code here.
 	output,err := sc.ProcessFunc(Query,args)
 	if err != OK{
 		reply.Err = err
@@ -108,11 +101,11 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 }
 
 func (sc *ShardCtrler)ProcessFunc(Type int,args interface{})(output interface{},err Err){
-	argsB,_ := json.Marshal(args)
+	//argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
 		uuid.New().ID(),
-		argsB,
+		args,
 	}
 	ch :=sc.cb.subscribe(op.CbIdx)
 	defer sc.cb.cancel(op.CbIdx)
@@ -131,13 +124,10 @@ func (sc *ShardCtrler)ProcessFunc(Type int,args interface{})(output interface{},
 
 //
 // the tester calls Kill() when a ShardCtrler instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
+// be needed again. turn off debug output from this instance.
 //
 func (sc *ShardCtrler) Kill() {
 	sc.rf.Kill()
-	// Your code here, if desired.
 }
 
 // needed by shardkv tester
@@ -145,7 +135,10 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 	return sc.rf
 }
 
-//currConfig单调递增，所以已经commit的命令再commit也没事。shardMove带着版本号防止move错误
+//two phase commit method to update placement of shards in each raft group
+//prepare phase: inform raft groups to retrieve needed shards
+//commit phase: inform raft groups to delete shards they no longer own
+//currConfig monotonically increasing，so committed is ok to commit again。shardMove also brought config version to prevent move error
 func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,oldConfig int,newConfig int){
 	//phase 1 notify servers to get new shard
 	var wg sync.WaitGroup
@@ -158,8 +151,7 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		}()
 	}
 	wg.Wait()
-	//fmt.Println("phase 1 complete")
-	//
+
 	fromServers := make(map[int][]string)
 	for _,task := range plan{
 		if task.from == 0{
@@ -177,13 +169,11 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		}()
 	}
 	wg.Wait()
-	//fmt.Println("phase 2 complete")
-	sc.ProcessFunc(CurConfigUpdate,[]int{oldConfig,newConfig})
-
-	fmt.Println(fmt.Sprintf("config %d -> %d Plan: %v",oldConfig,newConfig,planToString(plan)))
+	sc.ProcessFunc(CurConfigUpdate,&[]int{oldConfig,newConfig})
 }
 
-
+//go routine periodically check if need shard move
+//it s only the leader's job
 func (sc *ShardCtrler)shardsUpdate(){
 	for {
 		_,isLeader:=sc.rf.GetState()
@@ -203,19 +193,13 @@ func (sc *ShardCtrler)shardsUpdate(){
 	}
 }
 
-//
-// servers[] contains the ports of the set of
-// servers that will cooperate via Raft to
-// form the fault-tolerant shardctrler service.
-// me is the index of the current server in servers[].
-//
-
+//applier routine
 func (sc *ShardCtrler)applier(){
 	for msg := range sc.applyCh{
 		if msg.CommandValid{
 			op := msg.Command.(Op)
 			sc.processOp(&op)
-			if sc.rf.GetRaftStateSize() >= MaxRaftState && MaxRaftState != -1{
+			if sc.rf.GetRaftStateSize() >= MaxRaftState && MaxRaftState != -1{//snapshot when raft state bigger then MaxRaftState
 				sc.Snapshot(msg.CommandIndex)
 			}
 		}else if msg.SnapshotValid{
@@ -232,20 +216,15 @@ func  (sc *ShardCtrler)processOp(op *Op){
 	var reply interface{}
 	switch op.Type {
 	case Query:
-		args := QueryArgs{}
-		json.Unmarshal(op.Args, &args)
+		args :=op.Args.(*QueryArgs)
 		config := *getConfig(sc.configs,args.Num)
 		reply = &QueryReply{
 			false,
 			OK,
 			config,
 		}
-		//if !sc.cliSeq.checkDup(args.CliId,args.SeqNum){
-		//	sc.cliSeq.set(args.CliId,args.SeqNum)
-		//}
 	case Join:
-		args := JoinArgs{}
-		json.Unmarshal(op.Args, &args)
+		args :=op.Args.(*JoinArgs)
 		r :=&JoinReply{}
 		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
@@ -260,8 +239,7 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
 	case Leave:
-		args := LeaveArgs{}
-		json.Unmarshal(op.Args, &args)
+		args :=op.Args.(*LeaveArgs)
 		r :=&LeaveReply{}
 		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
@@ -276,8 +254,7 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
 	case Move:
-		args := MoveArgs{}
-		json.Unmarshal(op.Args, &args)
+		args :=op.Args.(*MoveArgs)
 		r :=&MoveReply{}
 		if sc.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.WrongLeader = false
@@ -292,13 +269,10 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
 	case CurConfigUpdate:
-		args := []int{}
-		json.Unmarshal(op.Args, &args)
+		args := *op.Args.(*[]int)
 		if sc.currConfig == args[0]{
 			sc.currConfig = args[1]
 		}
-
-		//fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
 	default:
 		fmt.Println("unkown type for clter",op.Type)
 	}
@@ -306,9 +280,6 @@ func  (sc *ShardCtrler)processOp(op *Op){
 	sc.mu.Unlock()
 	sc.cb.publish(op.CbIdx,reply)
 }
-
-
-
 
 func (sc *ShardCtrler)Snapshot(commandIdx int){
 	w := new(bytes.Buffer)
@@ -326,7 +297,6 @@ func (sc *ShardCtrler)Snapshot(commandIdx int){
 
 func (sc *ShardCtrler)restoreSnapshot(b []byte){
 	if !(b == nil || len(b) < 1) {
-		//fmt.Println(fmt.Sprintf("%d snapshot restore",kv.me))
 		sc.mu.Lock()
 		defer sc.mu.Unlock()
 		data := &Snapshot{}
@@ -338,7 +308,7 @@ func (sc *ShardCtrler)restoreSnapshot(b []byte){
 		sc.cliSeq = newCache(5*time.Minute,data.CacheData)
 	}
 }
-//Todo 加入一个make_end Func
+
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,make_end func(string) *labrpc.ClientEnd) *ShardCtrler {
 	sc := new(ShardCtrler)
 	sc.me = me
@@ -354,14 +324,17 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	sc.make_end = make_end
 
 	labgob.Register(Op{})
+	labgob.Register(&QueryArgs{})
+	labgob.Register(&JoinArgs{})
+	labgob.Register(&LeaveArgs{})
+	labgob.Register(&MoveArgs{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 	sc.cliSeq = newCache(5*time.Minute,make(map[uint32]int))
-	sc.cb =  &subPub{
+	sc.cb =  &pubSub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),
 	}
-	// Your code here.
 	sc.restoreSnapshot(sc.rf.ReadSnapshot())
 	go sc.applier()
 	go sc.shardsUpdate()

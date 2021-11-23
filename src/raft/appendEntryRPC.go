@@ -1,6 +1,5 @@
 package raft
 
-//AppendEntry
 type AppendEntryArgs struct {
 	Term         int64
 	LeaderId     int
@@ -15,7 +14,7 @@ type AppendEntryReply struct {
 	Success bool
 }
 
-//logworker receive command from channel
+//send logs to all peers
 func (rf *Raft) replicateLogs() {
 	for idx, _ := range rf.peers {
 		idx := idx
@@ -36,17 +35,16 @@ func (rf *Raft) replicateLog(peerIdx int) {
 
 	var entries []LogEntry
 	var prevLog LogEntry
+	//nextIdx check
 	if rf.nextIdx[peerIdx] <= rf.log[0].Idx {
 		rf.nextIdx[peerIdx] = rf.log[0].Idx + 1
 	} else if rf.nextIdx[peerIdx]-1 > rf.log[len(rf.log)-1].Idx {
 		rf.nextIdx[peerIdx] = rf.log[len(rf.log)-1].Idx
 	}
+
 	i := getLogSliceIdx(rf.log, int(rf.nextIdx[peerIdx]))
-	//peer catch up, maybe hb condition
 	if i < len(rf.log) {
 		entries = rf.log[i:]
-		//entries = make([]LogEntry,len(rf.log[i:]))
-		//copy(entries,rf.log[i:])
 	}
 	prevLog = rf.log[i-1]
 	args := &AppendEntryArgs{
@@ -59,20 +57,21 @@ func (rf *Raft) replicateLog(peerIdx int) {
 	}
 	reply := &AppendEntryReply{}
 	rf.mu.Unlock()
-	ok := rf.SendAppendEntry(peerIdx, args, reply)
-	rf.ProcessAppendEntryReply(peerIdx, ok, args, reply)
+	ok := rf.sendAppendEntry(peerIdx, args, reply)
+	rf.processAppendEntryReply(peerIdx, ok, args, reply)
 }
 
-//AppendEntries
-func (rf *Raft) SendAppendEntry(server int, args *AppendEntryArgs, reply *AppendEntryReply) bool {
+//RPC call
+func (rf *Raft) sendAppendEntry(server int, args *AppendEntryArgs, reply *AppendEntryReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntry", args, reply)
 	return ok
 }
 
-//TOdo 调整时间 ,防止重复复制,Todo 看commit的时候参考现在的log
+// AppendEntry receive replicated logs from leader and process
 func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+
 	if args.Term >= rf.currentTerm {
 		if args.Term > rf.currentTerm {
 			rf.changeToFollower(args.Term, -1)
@@ -80,17 +79,20 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 			rf.changeToFollower(rf.currentTerm, rf.votedFor)
 		}
 	} else {
+		//return false if receive from lower term
 		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
 	}
 
+	//return false if prevLogIndex not exist
 	if rf.log[len(rf.log)-1].Idx < args.PrevLogIndex {
 		reply.Term = rf.currentTerm
 		reply.Success = false
 		return
 	}
-	//不能直接用args.entry覆盖logs，防止有网络延迟，旧的请求把新请求添加的删除
+
+	//ptr is prev log idx
 	var ptr int
 	if args.PrevLogIndex >= rf.log[0].Idx {
 		ptr = getLogSliceIdx(rf.log, int(args.PrevLogIndex))
@@ -120,12 +122,14 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 				break
 			}
 		}
+		//commit logs if needed
 		if args.LeaderCommit > rf.commitIdx {
 			rf.commitIdx = min(args.LeaderCommit, rf.log[len(rf.log)-1].Idx)
 			rf.signalApplier()
 		}
 		return
 	} else {
+		//return false if prev log not match
 		rf.log = rf.log[:ptr]
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -133,10 +137,12 @@ func (rf *Raft) AppendEntry(args *AppendEntryArgs, reply *AppendEntryReply) {
 	}
 }
 
-func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryArgs, reply *AppendEntryReply) {
+//process response
+func (rf *Raft) processAppendEntryReply(peerIdx int, ok bool, args *AppendEntryArgs, reply *AppendEntryReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if !ok {
+		//retry if fail
 		go rf.replicateLog(peerIdx)
 		return
 	}
@@ -154,16 +160,14 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 			if newMatchIdx > rf.matchIdx[peerIdx] {
 				rf.matchIdx[peerIdx] = newMatchIdx
 			}
-			rf.leaderCommitLogs()
+			rf.commitLogs()
 		} else {
-			//for condition: reply term > old term, but not new term
-			//&& rf.nextIdx[peerIdx] > 1 or rf.next[peerIdx] = args.prevLogIdx
 			if !(reply.Term > args.Term) && rf.nextIdx[peerIdx] > args.PrevLogIndex {
 				rf.nextIdx[peerIdx] -= 1
 			}
-			if rf.nextIdx[peerIdx] > rf.log[0].Idx{
+			if rf.nextIdx[peerIdx] > rf.log[0].Idx{//send more logs to peers
 				go rf.replicateLog(peerIdx)
-			} else{
+			} else{ //peer is too old,send snapshot
 				go rf.installSnapshotToPeers(rf.log[0].Idx,rf.log[0].Term,rf.persister.ReadSnapshot())
 			}
 
@@ -172,8 +176,7 @@ func (rf *Raft) ProcessAppendEntryReply(peerIdx int, ok bool, args *AppendEntryA
 }
 
 //
-func (rf *Raft) leaderCommitLogs() {
-	//TODO match里面最小超过n/2的
+func (rf *Raft) commitLogs() {
 	if rf.role != Leader {
 		return
 	}

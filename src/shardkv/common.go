@@ -8,9 +8,6 @@ import "sync"
 // Shardctrler decides which group serves each shard.
 // Shardctrler may change shard assignment from time to time.
 //
-// You will have to modify these definitions.
-//
-
 
 
 const (
@@ -32,14 +29,12 @@ type Err string
 
 // Put or Append
 type PutAppendArgs struct {
-	// You'll have to add definitions here.
 	CliId uint32
 	SeqNum int
 	Key   string
 	Shard int
 	Value string
 	Op    string // "Put" or "Append"
-	// You'll have to add definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 }
@@ -50,10 +45,8 @@ type PutAppendReply struct {
 
 type GetArgs struct {
 	CliId uint32
-	//SeqNum int
 	Key string
 	Shard int
-	// You'll have to add definitions here.
 }
 
 type GetReply struct {
@@ -81,19 +74,19 @@ type ShardsDeleteArgs struct {
 	CommitConfig int
 }
 
-type subPub struct {
+type pubSub struct {
 	mu      sync.RWMutex
 	mem map[uint32]chan interface{}
 }
 
-func (sp *subPub)subscribe(key uint32)chan interface{}{
+func (sp *pubSub)subscribe(key uint32)chan interface{}{
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	sp.mem[key] = make(chan interface{},1)
 	return sp.mem[key]
 }
 
-func (sp *subPub)publish(key uint32,res interface{}){
+func (sp *pubSub)publish(key uint32,res interface{}){
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	ch,ok := sp.mem[key]
@@ -102,7 +95,7 @@ func (sp *subPub)publish(key uint32,res interface{}){
 	}
 }
 
-func (sp *subPub)cancel(key uint32){
+func (sp *pubSub)cancel(key uint32){
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	delete(sp.mem,key)

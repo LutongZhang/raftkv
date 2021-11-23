@@ -50,13 +50,11 @@ func TestStaticShards(t *testing.T) {
 	for i := 0; i < n; i++ {
 		check(t, ck, ka[i], va[i])
 	}
-	fmt.Println(1)
 	// make sure that the data really is sharded by
 	// shutting down one shard and checking that some
 	// Get()s don't succeed.
 	cfg.ShutdownGroup(1)
 	cfg.checklogs() // forbid snapshots
-	fmt.Println(2)
 	ch := make(chan string)
 	for xi := 0; xi < n; xi++ {
 		ck1 := cfg.makeClient() // only one call allowed per client
@@ -69,7 +67,6 @@ func TestStaticShards(t *testing.T) {
 			}
 		}(xi)
 	}
-	fmt.Println(3)
 	// wait a bit, only about half the Gets should succeed.
 	ndone := 0
 	done := false

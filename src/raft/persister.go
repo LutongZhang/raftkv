@@ -1,13 +1,8 @@
 package raft
 
 //
-// support for Raft and kvraft to save persistent
+// support for Raft and kv to save persistent
 // Raft state (log &c) and k/v server snapshots.
-//
-// we will use the original persister.go to test your code for grading.
-// so, while you can modify this code to help you debug, please
-// test with the original before submitting.
-//
 
 import (
 	"6.824/labgob"
@@ -83,8 +78,6 @@ func (ps *Persister) SnapshotSize() int {
 //
 // save Raft's persistent state to stable storage,
 // where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-//
 func (rf *Raft) persistState() {
 	currTerm := rf.currentTerm
 	votedFor := rf.votedFor
@@ -116,6 +109,7 @@ func (rf *Raft) persistStateAndSnapshot(snapshotByte []byte) {
 	stateByte := w.Bytes()
 	rf.persister.SaveStateAndSnapshot(stateByte, snapshotByte)
 }
+
 func (rf *Raft) persistStateAndSnapshotL(snapshotByte []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()

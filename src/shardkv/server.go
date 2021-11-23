@@ -23,7 +23,6 @@ const (
 )
 
 type Op struct {
-	// Your definitions here.
 	// Field names must start with capital letters,
 	// otherwise RPC will break.
 	Type int
@@ -51,7 +50,7 @@ type ShardKV struct {
 	rf           *raft.Raft
 	applyCh      chan raft.ApplyMsg
 	make_end     func(string) *labrpc.ClientEnd
-	cb       *subPub
+	cb       	*pubSub
 	gid          int
 	ctrlers      []*labrpc.ClientEnd
 	mck  *shardctrler.Clerk
@@ -59,18 +58,14 @@ type ShardKV struct {
 
 	cliSeq *Cache
 	shards map[int]*Shard
-	// Your definitions here.
 }
-
 
 type Snapshot struct {
 	Shards map[int]*Shard
 	CacheData map[uint32]int
 }
 
-
 func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
 	output,err := kv.ProcessFunc(Get,args)
 	if err != OK{
 		reply.Err = err
@@ -81,7 +76,6 @@ func (kv *ShardKV) Get(args *GetArgs, reply *GetReply) {
 }
 
 func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
 	Type := Put
 	if args.Op == "Append"{
 		Type = Append
@@ -95,13 +89,16 @@ func (kv *ShardKV) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	}
 }
 
-//Todo 做version的比较
+// PrepareShardMove
+//when receive shardMoveTask, leader needs to retrieve shards from other raft group and send shard to other replicas by raft protocol
 func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply *shardctrler.PrepareShardMoveReply) {
+	//leader's job
 	if _,isLeader :=kv.rf.GetState();!isLeader{
 		reply.Err = ErrWrongLeader
 		return
 	}
 	kv.mu.Lock()
+	//find out shards needed
 	shards := []int{}
 	for _,shardId := range args.ShardIds{
 		shard,ok := kv.shards[shardId]
@@ -114,7 +111,9 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 		reply.Err = OK
 		return
 	}
+	//retrieve shards
 	RetrievedShardsReply := kv.sendRetrieveShards(args.NewConfig,args.From,args.FromGroup,shards)
+	//if found old task,return
 	if RetrievedShardsReply.Err == ErrOldConfig{
 		reply.Err = OK
 		return
@@ -141,6 +140,8 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 	}
 }
 
+// CommitShardMove
+//when receive CommitShardMoveTask, leader make sure all replicas in this raft group delete unowned shards by raft protocol
 func (kv *ShardKV)CommitShardMove(args *shardctrler.CommitShardArgs,reply *shardctrler.CommitShardReply)  {
 	ShardsDeleteArgs := &ShardsDeleteArgs{
 		args.Config,
@@ -192,8 +193,7 @@ func (kv *ShardKV)applier(){
 		if msg.CommandValid{
 			op := msg.Command.(Op)
 			kv.processOp(&op)
-			if kv.rf.GetRaftStateSize() >= kv.maxraftstate && kv.maxraftstate != -1{
-				//fmt.Println("xxxxx",kv.rf.GetRaftStateSize(),kv.rf.GetSnapShotSize())
+			if kv.rf.GetRaftStateSize() >= kv.maxraftstate && kv.maxraftstate != -1{//snapshot when raft state over maxraftstatesize
 				kv.Snapshot(msg.CommandIndex)
 			}
 		}else if msg.SnapshotValid{
@@ -206,7 +206,6 @@ func (kv *ShardKV)applier(){
 }
 
 func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
-	//fmt.Println(fmt.Sprintf("xxxxxxxx gid: %d,me:%d,op:%s",kv.gid,kv.me,opName(op.Type)))
 	doSnapshot = false
 	kv.mu.Lock()
 	var reply interface{}
@@ -231,7 +230,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &PutAppendReply{}
-		//fmt.Println(fmt.Sprintf("put gid: %d,me:%d,args:%v,shards: %v",kv.gid,kv.me,args,getShardsInfo(kv.shards)))
+		//if duplicate req,directly return
 		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.Err = OK
 			reply = r
@@ -245,7 +244,6 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 				r.Err = ErrWrongGroup
 			}
 			reply = r
-			//fmt.Println(fmt.Sprintf("put end gid: %d,me:%d,args:%v,shards: %v",kv.gid,kv.me,args,getShardsInfo(kv.shards)))
 		}
 	case Append:
 		args := PutAppendArgs{}
@@ -278,22 +276,16 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 				kv.shards[shardid] = newShard
 			}
 		}
+		//we need to combine other raft group's history cliSeq to prevent duplicated requests
 		kv.cliSeq.combine(args.CliSeq)
-		//fmt.Println(fmt.Sprintf("shards add - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 		reply = OK
 	case ShardsDelete:
 		args := ShardsDeleteArgs{}
 		json.Unmarshal(op.Args, &args)
-		deleteExist := false
 		for shardid,shard := range kv.shards{
 			if shard.State==Stale && shard.Config<args.CommitConfig{
 				delete(kv.shards,shardid)
-				deleteExist = true
 			}
-		}
-		//delete unneed shards in snapshots by flush
-		if deleteExist{
-			doSnapshot = true
 		}
 		reply = OK
 	case RetrieveShards:
@@ -304,9 +296,10 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 		data := make(map[int]map[string]string)
 		for _,shardId := range args.ShardsId{
 			shard,ok := kv.shards[shardId]
-			if !ok || shard.Config >=args.Config{
+			if !ok || shard.Config >= args.Config{//execute command only on config version is bigger
 				r.Err = ErrOldConfig
 			}else{
+				//when the shards is going to be moved, set state to stale, reject requests and wait to be deleted
 				kv.shards[shardId].State = Stale
 				data[shardId] = kv.shards[shardId].CopyData()
 			}
@@ -316,7 +309,6 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 			r.CliSeq = kv.cliSeq.CopyData()
 		}
 		reply = r
-		//fmt.Println(fmt.Sprintf("shards be Retrieved - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 	default:
 		fmt.Println("unknown type for kv:",op.Type)
 	}
@@ -354,17 +346,11 @@ func (kv *ShardKV)restoreSnapshot(b []byte){
 
 //
 // the tester calls Kill() when a ShardKV instance won't
-// be needed again. you are not required to do anything
-// in Kill(), but it might be convenient to (for example)
-// turn off debug output from this instance.
+// be needed again. turn off debug output from this instance.
 //
 func (kv *ShardKV) Kill() {
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
-
-
-
 
 //
 // servers[] contains the ports of the servers in this group.
@@ -388,15 +374,7 @@ func (kv *ShardKV) Kill() {
 // Config.Groups[gid][i] into a labrpc.ClientEnd on which you can
 // send RPCs. You'll need this to send RPCs to other groups.
 //
-// look at client.go for examples of how to use ctrlers[]
-// and make_end() to send RPCs to the group owning a specific shard.
-//
-// StartServer() must return quickly, so it should start goroutines
-// for any long-running work.
-//
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
-	// call labgob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
 
 	kv := new(ShardKV)
@@ -408,17 +386,11 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.ctrlers = ctrlers
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.cliSeq = newCache(5*time.Minute,make(map[uint32]int))
-	kv.cb =  &subPub{
+	kv.cb =  &pubSub{
 		sync.RWMutex{},
 		make(map[uint32]chan interface{}),
 	}
 	kv.shards = make(map[int]*Shard)
-
-	// Your initialization code here.
-
-	// Use something like this to talk to the shardctrler:
-	// kv.mck = shardctrler.MakeClerk(kv.ctrlers)
-
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 

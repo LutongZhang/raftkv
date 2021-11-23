@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 )
-
+//Cache is used to check dup req
 type Cache struct {
 	mu sync.RWMutex
 	Data map[uint32]int

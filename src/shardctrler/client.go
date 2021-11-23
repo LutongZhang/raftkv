@@ -2,21 +2,20 @@ package shardctrler
 
 //
 // Shardctrler clerk.
-//
-//Todo remove replicate
 
 import (
 	"6.824/labrpc"
+	"crypto/rand"
 	"github.com/google/uuid"
+	"math/big"
+	"time"
 )
-import "time"
-import "crypto/rand"
-import "math/big"
+
 
 type Clerk struct {
 	servers []*labrpc.ClientEnd
-	CliId uint32
-	SeqNum int
+	CliId uint32 //identifier
+	SeqNum int //cmds are sent Synchronously,each with seqNum
 }
 
 func nrand() int64 {
@@ -31,18 +30,16 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck.servers = servers
 	ck.CliId = uuid.New().ID()
 	ck.SeqNum = 0
-	// Your code here.
 	return ck
 }
 
+// Query config with version, -1 is the latest version
 func (ck *Clerk) Query(num int) Config {
-	//ck.SeqNum+=1
+	//query is Idempotent，not need seq
 	args := &QueryArgs{
 		ck.CliId,
-		//ck.SeqNum,
 		num,
 	}
-	// Your code here.
 	args.Num = num
 	for {
 		// try each known server.
@@ -57,6 +54,7 @@ func (ck *Clerk) Query(num int) Config {
 	}
 }
 
+// Join new raft group
 func (ck *Clerk) Join(servers map[int][]string) {
 	ck.SeqNum+=1
 	args := &JoinArgs{
@@ -64,7 +62,6 @@ func (ck *Clerk) Join(servers map[int][]string) {
 		ck.SeqNum,
 		servers,
 	}
-	// Your code here.
 	args.Servers = servers
 
 	for {
@@ -80,6 +77,7 @@ func (ck *Clerk) Join(servers map[int][]string) {
 	}
 }
 
+// Leave raft group
 func (ck *Clerk) Leave(gids []int) {
 	ck.SeqNum+=1
 	args := &LeaveArgs{
@@ -87,9 +85,6 @@ func (ck *Clerk) Leave(gids []int) {
 		ck.SeqNum,
 		gids,
 	}
-	// Your code here.
-	args.GIDs = gids
-
 	for {
 		// try each known server.
 		for _, srv := range ck.servers {
@@ -103,6 +98,7 @@ func (ck *Clerk) Leave(gids []int) {
 	}
 }
 
+//Move a shard to certain raft group
 func (ck *Clerk) Move(shard int, gid int) {
 	ck.SeqNum+=1
 	args := &MoveArgs{
@@ -111,7 +107,6 @@ func (ck *Clerk) Move(shard int, gid int) {
 		shard,
 		gid,
 	}
-	// Your code here.
 	args.Shard = shard
 	args.GID = gid
 

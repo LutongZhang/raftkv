@@ -20,8 +20,6 @@ import (
 // #0 is the initial configuration, with no groups and all shards
 // assigned to group 0 (the invalid group).
 //
-// You will need to add fields to the RPC argument structs.
-//
 
 //MaxRaftState
 const MaxRaftState = 1000
@@ -30,7 +28,6 @@ const MaxRaftState = 1000
 const NShards = 10
 
 // A configuration -- an assignment of shards to groups.
-// Please don't change this.
 type Config struct {
 	Num    int              // config number
 	Shards [NShards]int     // shard -> gid
@@ -146,7 +143,6 @@ type MoveReply struct {
 
 type QueryArgs struct {
 	CliId uint32
-	//SeqNum int
 	Num int // desired config number
 }
 
@@ -188,19 +184,20 @@ type ShardsMoveTask struct {
 	shardIds []int
 }
 
-type subPub struct {
+//
+type pubSub struct {
 	mu      sync.RWMutex
 	mem map[uint32]chan interface{}
 }
 
-func (sp *subPub)subscribe(key uint32)chan interface{}{
+func (sp *pubSub)subscribe(key uint32)chan interface{}{
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	sp.mem[key] = make(chan interface{},1)
 	return sp.mem[key]
 }
 
-func (sp *subPub)publish(key uint32,res interface{}){
+func (sp *pubSub)publish(key uint32,res interface{}){
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	ch,ok := sp.mem[key]
@@ -209,7 +206,7 @@ func (sp *subPub)publish(key uint32,res interface{}){
 	}
 }
 
-func (sp *subPub)cancel(key uint32){
+func (sp *pubSub)cancel(key uint32){
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	delete(sp.mem,key)

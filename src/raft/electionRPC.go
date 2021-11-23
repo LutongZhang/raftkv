@@ -1,18 +1,14 @@
 package raft
 
-//Todo use election task
+
 func (rf *Raft) startElection() {
-	//rf.mu.Lock()
 	if rf.role != Candidate {
-		//rf.mu.Unlock()
 		return
 	}
 	currTerm := rf.currentTerm
 	me := rf.me
 	lastLog := rf.log[len(rf.log)-1]
 	rf.log_info("start election")
-	//rf.mu.Unlock()
-	//
 	recVotes := 1
 	finish := false
 
@@ -35,14 +31,15 @@ func (rf *Raft) startElection() {
 				defer rf.mu.Unlock()
 				if reply.VoteGrant {
 					recVotes += 1
+					//become leader if majority agree
 					if recVotes > len(rf.peers)/2 && !finish {
 						finish = true
-						//Todo
-						//检查和当前term是否匹配，防止网络延迟，旧的term同意leader，但是新的term已经有新的leader，造成脑裂
+						//current term must be same as election term! prevent split brain
 						if rf.currentTerm != currTerm {
 							return
 						}
 						rf.changeToLeader()
+						//inform peers I am the leader
 						rf.replicateLogs()
 					}
 				} else if reply.Term > rf.currentTerm {
@@ -65,42 +62,13 @@ type RequestVoteReply struct {
 	VoteGrant bool
 }
 
-//
-// example code to send a RequestVote RPC to a server.
-// server is the index of the target server in rf.peers[].
-// expects RPC arguments in args.
-// fills in *reply with RPC reply, so caller should
-// pass &reply.
-// the types of the args and reply passed to Call() must be
-// the same as the types of the arguments declared in the
-// handler function (including whether they are pointers).
-//
-// The labrpc package simulates a lossy network, in which servers
-// may be unreachable, and in which requests and replies may be lost.
-// Call() sends a request and waits for a reply. If a reply arrives
-// within a timeout interval, Call() returns true; otherwise
-// Call() returns false. Thus Call() may not return for a while.
-// A false return can be caused by a dead server, a live server that
-// can't be reached, a lost request, or a lost reply.
-//
-// Call() is guaranteed to return (perhaps after a delay) *except* if the
-// handler function on the server side does not return.  Thus there
-// is no need to implement your own timeouts around Call().
-//
-// look at the comments in ../labrpc/labrpc.go for more details.
-//
-// if you're having trouble getting RPC to work, check that you've
-// capitalized all field names in structs passed over RPC, and
-// that the caller passes the address of the reply struct with &, not
-// the struct itself.
-//
-//sender
+//rpc call
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	return ok
 }
 
-//receiver
+// RequestVote receive vote from other candidate
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -116,6 +84,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	lastLog := rf.log[len(rf.log)-1]
+	//vote requirement
 	uptoData := (args.LastLogTerm == lastLog.Term && args.LastLogIdx >= lastLog.Idx) || (args.LastLogTerm > lastLog.Term)
 	if rf.votedFor == -1 && uptoData {
 		rf.changeToFollower(rf.currentTerm, args.CandidateId)
