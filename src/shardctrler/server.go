@@ -148,7 +148,6 @@ func (sc *ShardCtrler) Raft() *raft.Raft {
 //currConfig单调递增，所以已经commit的命令再commit也没事。shardMove带着版本号防止move错误
 func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,oldConfig int,newConfig int){
 	//phase 1 notify servers to get new shard
-	fmt.Println(fmt.Sprintf("config %d -> %d Plan: %v",oldConfig,newConfig,plan))
 	var wg sync.WaitGroup
 	for _,task := range plan{
 		wg.Add(1)
@@ -159,7 +158,7 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		}()
 	}
 	wg.Wait()
-	fmt.Println("phase 1 complete")
+	//fmt.Println("phase 1 complete")
 	//
 	fromServers := make(map[int][]string)
 	for _,task := range plan{
@@ -178,8 +177,10 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		}()
 	}
 	wg.Wait()
-	fmt.Println("phase 2 complete")
+	//fmt.Println("phase 2 complete")
 	sc.ProcessFunc(CurConfigUpdate,[]int{oldConfig,newConfig})
+
+	fmt.Println(fmt.Sprintf("config %d -> %d Plan: %v",oldConfig,newConfig,planToString(plan)))
 }
 
 
@@ -296,7 +297,8 @@ func  (sc *ShardCtrler)processOp(op *Op){
 		if sc.currConfig == args[0]{
 			sc.currConfig = args[1]
 		}
-		fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
+
+		//fmt.Println(fmt.Sprintf("CurrConfigUpdate - config: %d,Content:%v",sc.currConfig,sc.configs[sc.currConfig].Shards))
 	default:
 		fmt.Println("unkown type for clter",op.Type)
 	}

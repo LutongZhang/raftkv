@@ -77,6 +77,10 @@ type ShardsMoveArgs struct {
 	CliSeq map[uint32]int
 }
 
+type ShardsDeleteArgs struct {
+	CommitConfig int
+}
+
 type subPub struct {
 	mu      sync.RWMutex
 	mem map[uint32]chan interface{}

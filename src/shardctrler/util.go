@@ -96,3 +96,12 @@ func getErr(v interface{})Err{
 	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()
 	return Err(x)
 }
+
+
+func planToString(input map[string]*ShardsMoveTask)map[string]string{
+	output := make(map[string]string)
+	for k,v := range input{
+		output[k]=fmt.Sprintf("%#v", v)
+	}
+	return output
+}

@@ -123,7 +123,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		value,
 		op,
 	}
-
 	for {
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {

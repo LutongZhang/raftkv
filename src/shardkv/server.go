@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	Get  =  0
-	Put = 1
-	Append = 2
-	ShardsAdd = 3
-	RetrieveShards = 4
+	Get = iota
+	Put
+	Append
+	ShardsAdd
+	ShardsDelete
+	RetrieveShards
 )
 
 type Op struct {
@@ -141,19 +142,16 @@ func (kv *ShardKV) PrepareShardMove(args *shardctrler.PrepareShardMoveArgs,reply
 }
 
 func (kv *ShardKV)CommitShardMove(args *shardctrler.CommitShardArgs,reply *shardctrler.CommitShardReply)  {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	//deleteExist := false
-	for shardid,shard := range kv.shards{
-		if shard.State==Stale && shard.Config<args.Config{
-			delete(kv.shards,shardid)
-			//deleteExist = true
-		}
+	ShardsDeleteArgs := &ShardsDeleteArgs{
+		args.Config,
 	}
-
-	//delete some unused shards in snapshots by flush
-
-	reply.Err = OK
+	output,err:=kv.ProcessFunc(ShardsDelete,ShardsDeleteArgs)
+	if err != OK{
+		reply.Err = shardctrler.Err(err)
+	} else{
+		v := output.(string)
+		reply.Err = shardctrler.Err(v)
+	}
 }
 
 func (kv *ShardKV)RetrieveShards(args *RetrieveShardsArgs,reply *RetrieveShardsReply){
@@ -207,7 +205,9 @@ func (kv *ShardKV)applier(){
 	}
 }
 
-func  (kv *ShardKV)processOp(op *Op){
+func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
+	//fmt.Println(fmt.Sprintf("xxxxxxxx gid: %d,me:%d,op:%s",kv.gid,kv.me,opName(op.Type)))
+	doSnapshot = false
 	kv.mu.Lock()
 	var reply interface{}
 	switch op.Type {
@@ -227,13 +227,11 @@ func  (kv *ShardKV)processOp(op *Op){
 			r.Err = ErrWrongGroup
 		}
 		reply = r
-		//if !kv.cliSeq.checkDup(args.CliId,args.SeqNum){
-		//	kv.cliSeq.set(args.CliId,args.SeqNum)
-		//}
 	case Put:
 		args := PutAppendArgs{}
 		json.Unmarshal(op.Args, &args)
 		r := &PutAppendReply{}
+		//fmt.Println(fmt.Sprintf("put gid: %d,me:%d,args:%v,shards: %v",kv.gid,kv.me,args,getShardsInfo(kv.shards)))
 		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.Err = OK
 			reply = r
@@ -247,6 +245,7 @@ func  (kv *ShardKV)processOp(op *Op){
 				r.Err = ErrWrongGroup
 			}
 			reply = r
+			//fmt.Println(fmt.Sprintf("put end gid: %d,me:%d,args:%v,shards: %v",kv.gid,kv.me,args,getShardsInfo(kv.shards)))
 		}
 	case Append:
 		args := PutAppendArgs{}
@@ -280,7 +279,22 @@ func  (kv *ShardKV)processOp(op *Op){
 			}
 		}
 		kv.cliSeq.combine(args.CliSeq)
-		fmt.Println(fmt.Sprintf("shards add - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
+		//fmt.Println(fmt.Sprintf("shards add - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
+		reply = OK
+	case ShardsDelete:
+		args := ShardsDeleteArgs{}
+		json.Unmarshal(op.Args, &args)
+		deleteExist := false
+		for shardid,shard := range kv.shards{
+			if shard.State==Stale && shard.Config<args.CommitConfig{
+				delete(kv.shards,shardid)
+				deleteExist = true
+			}
+		}
+		//delete unneed shards in snapshots by flush
+		if deleteExist{
+			doSnapshot = true
+		}
 		reply = OK
 	case RetrieveShards:
 		args := RetrieveShardsArgs{}
@@ -302,13 +316,14 @@ func  (kv *ShardKV)processOp(op *Op){
 			r.CliSeq = kv.cliSeq.CopyData()
 		}
 		reply = r
-		fmt.Println(fmt.Sprintf("shards be Retrieved - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
+		//fmt.Println(fmt.Sprintf("shards be Retrieved - gid: %d,me:%d,shards:%v",kv.gid,kv.me,getShardsInfo(kv.shards)))
 	default:
 		fmt.Println("unknown type for kv:",op.Type)
 	}
 
 	kv.mu.Unlock()
 	kv.cb.publish(op.CbIdx,reply)
+	return doSnapshot
 }
 
 func (kv *ShardKV)Snapshot(commandIdx int){

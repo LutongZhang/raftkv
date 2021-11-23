@@ -1,7 +1,10 @@
 package shardkv
 
 import (
+	"6.824/labgob"
 	"6.824/porcupine"
+	raft2 "6.824/raft"
+	"bytes"
 )
 import "6.824/models"
 import "testing"
@@ -12,31 +15,6 @@ import "sync/atomic"
 import "sync"
 import "math/rand"
 import "io/ioutil"
-
-//func TestSnapShots(t *testing.T) {
-//	shards := map[int]*Shard{
-//		1:&Shard{
-//			"asd",
-//			1,
-//			map[string]string{"a":"b"},
-//		},
-//	}
-//	w := new(bytes.Buffer)
-//	e := labgob.NewEncoder(w)
-//	e.Encode(Snapshot{
-//		shards,
-//		map[uint32]int{1:1},
-//	})
-//	b := w.Bytes()
-//	//
-//	data := &Snapshot{}
-//	r := bytes.NewBuffer(b)
-//	d := labgob.NewDecoder(r)
-//	d.Decode(&data)
-//	fmt.Println("xxxxx",data.Shards[1],data.CacheData[1])
-//	//
-//
-//}
 
 const linearizabilityCheckTimeout = 1 * time.Second
 
@@ -759,6 +737,7 @@ func TestUnreliable3(t *testing.T) {
 	fmt.Printf("  ... Passed\n")
 }
 
+
 //
 // optional test to see whether servers are deleting
 // shards for which they are no longer responsible.
@@ -825,6 +804,19 @@ func TestChallenge1Delete(t *testing.T) {
 		for i := 0; i < cfg.n; i++ {
 			raft := cfg.groups[gi].saved[i].RaftStateSize()
 			snap := len(cfg.groups[gi].saved[i].ReadSnapshot())
+			s:= cfg.groups[gi].saved[i].ReadSnapshot()
+			fmt.Println("xxxxxxxx")
+			data := &Snapshot{}
+			log := []raft2.LogEntry{}
+			r := bytes.NewBuffer(s)
+			d := labgob.NewDecoder(r)
+			d.Decode(&data)
+			d.Decode(&log)
+			fmt.Println(fmt.Sprintf("group %d r %d",gi,i))
+			fmt.Println("store",getShardsInfo(data.Shards))
+			fmt.Println("cache",data.CacheData)
+			fmt.Println("log",log)
+			fmt.Println("xxxxxxxxxxx")
 			a+=snap
 			total += raft + snap
 		}
@@ -945,14 +937,13 @@ func TestChallenge2Partial(t *testing.T) {
 		va[i] = "100"
 		ck.Put(ka[i], va[i])
 	}
-
 	// QUERY to find shards owned by 102
 	c := cfg.mck.Query(-1)
 	owned := make(map[int]bool, n)
 	for s, gid := range c.Shards {
 		owned[s] = gid == cfg.groups[2].gid
 	}
-
+	//
 	// KILL 100
 	cfg.ShutdownGroup(0)
 
@@ -964,7 +955,6 @@ func TestChallenge2Partial(t *testing.T) {
 	// Give the implementation some time to start reconfiguration
 	// And to migrate 102 -> 101
 	<-time.After(1 * time.Second)
-
 	// And finally: check that gets/puts for 101-owned keys now complete
 	for i := 0; i < n; i++ {
 		shard := key2shard(ka[i])

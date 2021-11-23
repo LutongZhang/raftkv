@@ -62,3 +62,21 @@ func getErr(v interface{})Err{
 	x:= reflect.Indirect(reflect.ValueOf(v)).FieldByName("Err").String()
 	return Err(x)
 }
+
+func opName(op int)string{
+	if op == Get{
+		return "Get"
+	} else if op == Put{
+		return "Put"
+	} else if op == Append{
+		return "Append"
+	} else if op == ShardsAdd{
+		return "ShardsAdd"
+	} else if op == ShardsDelete{
+		return "ShardsDelete"
+	} else if op == ShardsDelete{
+		return "ShardsDelete"
+	} else{
+		return "unknown"
+	}
+}

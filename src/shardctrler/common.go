@@ -89,13 +89,13 @@ func (cfg *Config)Rebalance()*Config{
 	}
 	sort.Ints(gids)
 	divValue := int(math.Floor((float64(NShards)/float64(len(gids)) + 0.5)))
-	for i,v := range gids{
-		for j:=0;j < divValue;j++{
-			if divValue*i+j >= len(cfg.Shards){
-				break
-			}
-			cfg.Shards[divValue*i+j] = v
+
+	for i :=0;i<NShards;i++{
+		j := i/divValue
+		if j >=len(gids){
+			j = len(gids)-1
 		}
+		cfg.Shards[i] = gids[j]
 	}
 	return cfg
 }
