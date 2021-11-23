@@ -82,7 +82,7 @@ func TestStaticShards(t *testing.T) {
 			break
 		}
 	}
-	fmt.Println(4)
+
 	if ndone != 5 {
 		t.Fatalf("expected 5 completions with one shard dead; got %v\n", ndone)
 	}
@@ -499,7 +499,6 @@ func TestConcurrent3(t *testing.T) {
 		cfg.ShutdownGroup(0)
 		cfg.ShutdownGroup(1)
 		cfg.ShutdownGroup(2)
-		fmt.Println("start 1 2 3")
 		cfg.StartGroup(0)
 		cfg.StartGroup(1)
 		cfg.StartGroup(2)

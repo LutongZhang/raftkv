@@ -6,7 +6,6 @@ import (
 	"6.824/raft"
 	"6.824/shardctrler"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"github.com/google/uuid"
 	"sync"
@@ -27,7 +26,7 @@ type Op struct {
 	// otherwise RPC will break.
 	Type int
 	CbIdx uint32
-	Args []byte
+	Args interface{}
 }
 
 type Shard struct {
@@ -166,11 +165,10 @@ func (kv *ShardKV)RetrieveShards(args *RetrieveShardsArgs,reply *RetrieveShardsR
 }
 
 func (kv *ShardKV)ProcessFunc(Type int,args interface{})(output interface{},err Err){
-	argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
 		uuid.New().ID(),
-		argsB,
+		args,
 	}
 	ch :=kv.cb.subscribe(op.CbIdx)
 	defer kv.cb.cancel(op.CbIdx)
@@ -211,8 +209,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 	var reply interface{}
 	switch op.Type {
 	case Get:
-		args := GetArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*GetArgs)
 		r := &GetReply{}
 		if shard,ok := kv.shards[args.Shard];ok&&shard.State==Working{
 			data := shard.Data
@@ -227,8 +224,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 		}
 		reply = r
 	case Put:
-		args := PutAppendArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*PutAppendArgs)
 		r := &PutAppendReply{}
 		//if duplicate req,directly return
 		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
@@ -246,8 +242,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 			reply = r
 		}
 	case Append:
-		args := PutAppendArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*PutAppendArgs)
 		r := &PutAppendReply{}
 		if kv.cliSeq.checkDup(args.CliId,args.SeqNum){
 			r.Err = OK
@@ -268,8 +263,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 			reply = r
 		}
 	case ShardsAdd:
-		args := ShardsMoveArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*ShardsMoveArgs)
 		for shardid,newShard := range args.Data{
 			v,ok :=kv.shards[shardid]
 			if !ok ||(newShard.Config>v.Config){
@@ -280,8 +274,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 		kv.cliSeq.combine(args.CliSeq)
 		reply = OK
 	case ShardsDelete:
-		args := ShardsDeleteArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*ShardsDeleteArgs)
 		for shardid,shard := range kv.shards{
 			if shard.State==Stale && shard.Config<args.CommitConfig{
 				delete(kv.shards,shardid)
@@ -289,8 +282,7 @@ func  (kv *ShardKV)processOp(op *Op)(doSnapshot bool){
 		}
 		reply = OK
 	case RetrieveShards:
-		args := RetrieveShardsArgs{}
-		json.Unmarshal(op.Args, &args)
+		args := op.Args.(*RetrieveShardsArgs)
 		r := &RetrieveShardsReply{}
 		r.Err = OK
 		data := make(map[int]map[string]string)
@@ -376,6 +368,11 @@ func (kv *ShardKV) Kill() {
 //
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int, gid int, ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.ClientEnd) *ShardKV {
 	labgob.Register(Op{})
+	labgob.Register(&GetArgs{})
+	labgob.Register(&PutAppendArgs{})
+	labgob.Register(&ShardsMoveArgs{})
+	labgob.Register(&ShardsDeleteArgs{})
+	labgob.Register(&RetrieveShardsArgs{})
 
 	kv := new(ShardKV)
 	kv.me = me

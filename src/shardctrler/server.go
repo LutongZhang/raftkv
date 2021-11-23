@@ -101,7 +101,6 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 }
 
 func (sc *ShardCtrler)ProcessFunc(Type int,args interface{})(output interface{},err Err){
-	//argsB,_ := json.Marshal(args)
 	op := Op{
 		Type,
 		uuid.New().ID(),
@@ -169,7 +168,7 @@ func (sc *ShardCtrler)twoPhaseCommitShardMove(plan map[string]*ShardsMoveTask,ol
 		}()
 	}
 	wg.Wait()
-	sc.ProcessFunc(CurConfigUpdate,&[]int{oldConfig,newConfig})
+	sc.ProcessFunc(CurConfigUpdate,[]int{oldConfig,newConfig})
 }
 
 //go routine periodically check if need shard move
@@ -269,7 +268,7 @@ func  (sc *ShardCtrler)processOp(op *Op){
 			sc.cliSeq.set(args.CliId,args.SeqNum)
 		}
 	case CurConfigUpdate:
-		args := *op.Args.(*[]int)
+		args := op.Args.([]int)
 		if sc.currConfig == args[0]{
 			sc.currConfig = args[1]
 		}
@@ -310,6 +309,13 @@ func (sc *ShardCtrler)restoreSnapshot(b []byte){
 }
 
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,make_end func(string) *labrpc.ClientEnd) *ShardCtrler {
+	//rpc register structs
+	labgob.Register(Op{})
+	labgob.Register(&QueryArgs{})
+	labgob.Register(&JoinArgs{})
+	labgob.Register(&LeaveArgs{})
+	labgob.Register(&MoveArgs{})
+
 	sc := new(ShardCtrler)
 	sc.me = me
 	sc.mu = sync.RWMutex{}
@@ -322,12 +328,6 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	}
 	sc.currConfig = 0
 	sc.make_end = make_end
-
-	labgob.Register(Op{})
-	labgob.Register(&QueryArgs{})
-	labgob.Register(&JoinArgs{})
-	labgob.Register(&LeaveArgs{})
-	labgob.Register(&MoveArgs{})
 	sc.applyCh = make(chan raft.ApplyMsg)
 	sc.rf = raft.Make(servers, me, persister, sc.applyCh)
 	sc.cliSeq = newCache(5*time.Minute,make(map[uint32]int))
