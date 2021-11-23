@@ -78,6 +78,12 @@ func (cfg *Config)MoveShard(shard int, gid int)*Config{
 }
 
 func (cfg *Config)Rebalance()*Config{
+	if len(cfg.Groups) == 0{
+		for i :=0;i<NShards;i++{
+			cfg.Shards[i] = 0
+		}
+		return cfg
+	}
 	gids := make([]int, len(cfg.Groups))
 	i := 0
 	for k := range cfg.Groups {
@@ -86,7 +92,9 @@ func (cfg *Config)Rebalance()*Config{
 	}
 	sort.Ints(gids)
 	divValue := int(math.Floor((float64(NShards)/float64(len(gids)) + 0.5)))
-
+	if divValue <=0{
+		divValue = 1
+	}
 	for i :=0;i<NShards;i++{
 		j := i/divValue
 		if j >=len(gids){
