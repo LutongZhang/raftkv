@@ -6,15 +6,33 @@ rgkv is a distributed kv storage service using raft consensus algorithm.
 + *Linearizability*
 
 ## Table of Content
-+ [Architure](https://github.com/LutongZhang/rgkv#Architure)
++ [Test Case](https://github.com/LutongZhang/rgkv#Test-Case)
++ [Architecture](https://github.com/LutongZhang/rgkv#Architecture)
   + [shard controller](https://github.com/LutongZhang/rgkv#shard-controller)
   + [shardkv server](https://github.com/LutongZhang/rgkv#shardkv-server)
   + [shards movement](https://github.com/LutongZhang/rgkv#shards-movement)
 + [Raft](https://github.com/LutongZhang/rgkv#Raft)
 + [Linearizability](https://github.com/LutongZhang/rgkv#Linearizability)
 
-## Architure
-![rgkv architure](https://github.com/LutongZhang/rgkv/blob/main/diagrams/rgkv.png)
+## Test Case
+   Try to use go test to run test case
++ raft test (src/raft/test_test.go)
+  ```
+  cd src/raft/
+  go test -run <test case>
+  ```
++ shardctrler test (src/shardctrler/test_test.go)
+  ```
+  cd src/shardctrler/
+  go test -run <test case>
+  ```
++ shardkv test (src/shardkv/test_test.go)
+  ```
+  cd src/shardkv/
+  go test -run <test case>
+  ```
+## Architecture
+![rgkv architecture](https://github.com/LutongZhang/rgkv/blob/main/diagrams/rgkv.png)
 + ### shard controller
   The shardctrler manages a sequence of numbered configurations. Each configuration describes a set of replica groups and an assignment of shards to replica groups. 
   Shard controller use raft to prevent single-point failure.
