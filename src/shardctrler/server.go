@@ -1,11 +1,11 @@
 package shardctrler
 
 import (
-	"6.824/labgob"
-	"6.824/labrpc"
-	"6.824/raft"
 	"bytes"
 	"fmt"
+	"github.com/LutongZhang/rgkv/src/labgob"
+	"github.com/LutongZhang/rgkv/src/labrpc"
+	"github.com/LutongZhang/rgkv/src/raft"
 	"github.com/google/uuid"
 	"sync"
 	"time"

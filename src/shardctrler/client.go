@@ -4,8 +4,8 @@ package shardctrler
 // Shardctrler clerk.
 
 import (
-	"6.824/labrpc"
 	"crypto/rand"
+	"github.com/LutongZhang/rgkv/src/labrpc"
 	"github.com/google/uuid"
 	"math/big"
 	"time"

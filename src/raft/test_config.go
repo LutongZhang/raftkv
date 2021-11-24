@@ -8,9 +8,11 @@ package raft
 // test with the original before submitting.
 //
 
-import "6.824/labgob"
-import "6.824/labrpc"
-import "bytes"
+import (
+	"bytes"
+	"github.com/LutongZhang/rgkv/src/labgob"
+	"github.com/LutongZhang/rgkv/src/labrpc"
+)
 import "log"
 import "sync"
 import "testing"

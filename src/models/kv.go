@@ -1,7 +1,9 @@
 package models
 
-import "6.824/porcupine"
-import "fmt"
+import (
+	"fmt"
+	"github.com/LutongZhang/rgkv/src/porcupine"
+)
 import "sort"
 
 type KvInput struct {

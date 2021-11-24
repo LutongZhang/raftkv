@@ -1,12 +1,12 @@
 package shardkv
 
 import (
-	"6.824/labgob"
-	"6.824/labrpc"
-	"6.824/raft"
-	"6.824/shardctrler"
 	"bytes"
 	"fmt"
+	"github.com/LutongZhang/rgkv/src/labgob"
+	"github.com/LutongZhang/rgkv/src/labrpc"
+	"github.com/LutongZhang/rgkv/src/raft"
+	"github.com/LutongZhang/rgkv/src/shardctrler"
 	"github.com/google/uuid"
 	"sync"
 	"time"

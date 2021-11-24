@@ -1,11 +1,12 @@
 package shardctrler
 
-import "6.824/labrpc"
-import "6.824/raft"
-import "testing"
-import "os"
 
-// import "log"
+import (
+	"github.com/LutongZhang/rgkv/src/labrpc"
+	"github.com/LutongZhang/rgkv/src/raft"
+	"testing"
+)
+import "os"
 import crand "crypto/rand"
 import "math/rand"
 import "encoding/base64"

@@ -1,18 +1,18 @@
 package shardkv
 
-import "6.824/shardctrler"
-import "6.824/labrpc"
-import "testing"
+import (
+	"github.com/LutongZhang/rgkv/src/labrpc"
+	"github.com/LutongZhang/rgkv/src/shardctrler"
+	"github.com/LutongZhang/rgkv/src/raft"
+	"testing"
+)
 import "os"
-
-// import "log"
 import crand "crypto/rand"
 import "math/big"
 import "math/rand"
 import "encoding/base64"
 import "sync"
 import "runtime"
-import "6.824/raft"
 import "strconv"
 import "fmt"
 import "time"

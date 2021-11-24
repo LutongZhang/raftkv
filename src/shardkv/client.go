@@ -9,12 +9,12 @@ package shardkv
 //
 
 import (
-	"6.824/labrpc"
+	"github.com/LutongZhang/rgkv/src/labrpc"
+	"github.com/LutongZhang/rgkv/src/shardctrler"
 	"github.com/google/uuid"
 )
 import "crypto/rand"
 import "math/big"
-import "6.824/shardctrler"
 import "time"
 
 //

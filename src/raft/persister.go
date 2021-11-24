@@ -5,8 +5,8 @@ package raft
 // Raft state (log &c) and k/v server snapshots.
 
 import (
-	"6.824/labgob"
 	"bytes"
+	"github.com/LutongZhang/rgkv/src/labgob"
 	"sync"
 )
 

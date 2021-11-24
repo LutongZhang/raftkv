@@ -1,8 +1,8 @@
 package shardctrler
 
 import (
-	"6.824/labrpc"
 	"fmt"
+	"github.com/LutongZhang/rgkv/src/labrpc"
 	"reflect"
 	"time"
 )

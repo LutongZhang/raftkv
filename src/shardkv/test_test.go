@@ -1,12 +1,12 @@
 package shardkv
 
 import (
-	"6.824/labgob"
-	"6.824/porcupine"
-	raft2 "6.824/raft"
 	"bytes"
+	"github.com/LutongZhang/rgkv/src/labgob"
+	"github.com/LutongZhang/rgkv/src/models"
+	"github.com/LutongZhang/rgkv/src/porcupine"
+	raft2 "github.com/LutongZhang/rgkv/src/raft"
 )
-import "6.824/models"
 import "testing"
 import "strconv"
 import "time"

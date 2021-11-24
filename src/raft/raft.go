@@ -1,8 +1,9 @@
 package raft
 
 import (
-	"6.824/labgob"
 	"bytes"
+	"github.com/LutongZhang/rgkv/src/labgob"
+	"github.com/LutongZhang/rgkv/src/labrpc"
 	"os"
 
 	//	"bytes"
@@ -10,8 +11,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	//	"6.824/labgob"
-	"6.824/labrpc"
 )
 
 type Role int
