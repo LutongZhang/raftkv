@@ -801,22 +801,15 @@ func TestChallenge1Delete(t *testing.T) {
 			raft := cfg.groups[gi].saved[i].RaftStateSize()
 			snap := len(cfg.groups[gi].saved[i].ReadSnapshot())
 			s:= cfg.groups[gi].saved[i].ReadSnapshot()
-			fmt.Println("xxxxxxxx")
 			data := &Snapshot{}
 			log := []raft2.LogEntry{}
 			r := bytes.NewBuffer(s)
 			d := labgob.NewDecoder(r)
 			d.Decode(&data)
 			d.Decode(&log)
-			fmt.Println(fmt.Sprintf("group %d r %d",gi,i))
-			fmt.Println("store",getShardsInfo(data.Shards))
-			fmt.Println("cache",data.CacheData)
-			fmt.Println("log",log)
-			fmt.Println("xxxxxxxxxxx")
 			a+=snap
 			total += raft + snap
 		}
-		fmt.Println("mmmmm",a)
 	}
 
 	// 27 keys should be stored once.
