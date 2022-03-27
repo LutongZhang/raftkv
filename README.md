@@ -1,18 +1,18 @@
-# rgkv
-rgkv is a distributed kv storage service using raft consensus algorithm.  
+# raftkv
+raftkv is a distributed kv storage service using raft consensus algorithm.  
 + *Get/put/append operation*
 + *High Availability*
 + *Sharding*
 + *Linearizability*
 
 ## Table of Content
-+ [Test Case](https://github.com/LutongZhang/rgkv#Test-Case)
-+ [Architecture](https://github.com/LutongZhang/rgkv#Architecture)
-  + [shard controller](https://github.com/LutongZhang/rgkv#shard-controller)
-  + [shardkv server](https://github.com/LutongZhang/rgkv#shardkv-server)
-  + [shards movement](https://github.com/LutongZhang/rgkv#shards-movement)
-+ [Raft](https://github.com/LutongZhang/rgkv#Raft)
-+ [Linearizability](https://github.com/LutongZhang/rgkv#Linearizability)
++ [Test Case](https://github.com/LutongZhang/raftkv#Test-Case)
++ [Architecture](https://github.com/LutongZhang/raftkv#Architecture)
+  + [shard controller](https://github.com/LutongZhang/raftkv#shard-controller)
+  + [shardkv server](https://github.com/LutongZhang/raftkv#shardkv-server)
+  + [shards movement](https://github.com/LutongZhang/raftkv#shards-movement)
++ [Raft](https://github.com/LutongZhang/raftkv#Raft)
++ [Linearizability](https://github.com/LutongZhang/raftkv#Linearizability)
 
 ## Test Case
    Try to use go test to run test case
@@ -32,7 +32,7 @@ rgkv is a distributed kv storage service using raft consensus algorithm.
   go test -run <test case>
   ```
 ## Architecture
-![rgkv architecture](https://github.com/LutongZhang/rgkv/blob/main/diagrams/rgkv.png)
+![raftkv architecture](https://github.com/LutongZhang/raftkv/blob/main/diagrams/raftkv.png)
 + ### shard controller
   The shardctrler manages a sequence of numbered configurations. Each configuration describes a set of replica groups and an assignment of shards to replica groups. 
   Shard controller use raft to prevent single-point failure.
@@ -52,14 +52,14 @@ rgkv is a distributed kv storage service using raft consensus algorithm.
   + Apppend
 
 + ### shards movement
-  rgkv uses a way similar to two phases commit to implement shards movement logic. It ensures correct movement logic, garbage collection for stale shards, and uninterrupted service during movement.
+  raftkv uses a way similar to two phases commit to implement shards movement logic. It ensures correct movement logic, garbage collection for stale shards, and uninterrupted service during movement.
   + phase 1: shard controller sends prepare request to kv servers to get shards they need and install shards by sending it to raft log
   + phase 2: shard controller sends commit request to kv servers to garbage collect stale shards. 
   
   *each shard carry a config number to prevent tasks that have already been executed from being repeated
   
 ## Raft
-   [raft](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf) is a distributed consensus algorithm, which is easy to understand. The raft library in rgkv supported: 
+   [raft](https://pdos.csail.mit.edu/6.824/papers/raft-extended.pdf) is a distributed consensus algorithm, which is easy to understand. The raft library in raftkv supported: 
    + Leader election
    + Log
    + Persistence
@@ -67,7 +67,7 @@ rgkv is a distributed kv storage service using raft consensus algorithm.
 
    ### design diagram 
 
-   ![raft diagram](https://github.com/LutongZhang/rgkv/blob/main/diagrams/raft.png)
+   ![raft diagram](https://github.com/LutongZhang/raftkv/blob/main/diagrams/raft.png)
      
 ## Linearizability
 Linearizability ensured by:
