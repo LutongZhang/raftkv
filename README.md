@@ -32,7 +32,7 @@ raftkv is a distributed kv storage service using raft consensus algorithm.
   go test -run <test case>
   ```
 ## Architecture
-![raftkv architecture](https://github.com/LutongZhang/raftkv/blob/main/diagrams/raftkv.png)
+![raftkv architecture](https://github.com/LutongZhang/raftkv/blob/main/diagrams/rgkv.png)
 + ### shard controller
   The shardctrler manages a sequence of numbered configurations. Each configuration describes a set of replica groups and an assignment of shards to replica groups. 
   Shard controller use raft to prevent single-point failure.
